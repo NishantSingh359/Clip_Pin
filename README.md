@@ -23,9 +23,8 @@ https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
 
 ### Download ClipPin
 
-1. Open the ClipPin GitHub page
-2. Go to: Releases → Latest Release
-3. Download: `ClipPin-v1.0.zip`
+1. Go to: Releases → Latest Release
+2. Download: `ClipPin-v1.0.zip`
 
 ---
 
