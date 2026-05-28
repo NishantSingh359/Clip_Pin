@@ -16,9 +16,8 @@ Copy Pin is a small clipboard history shelf for **PySide6 / Qt**. It lets you co
 
 ---
 
+https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
 
-
-<video src="assets/clip pin vid.mp4" title="Title" width="60%" autoplay loop muted playsinline></video>
 
 ## ClipPin Installation Guide (Windows)
 
