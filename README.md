@@ -79,7 +79,7 @@ To launch ClipPin automatically when Windows starts:
 
 4. Create a shortcut of: `ClipPin.exe`
 
-5. Move `shortcut` and `_internal` folder into the Startup folder
+5. Move the `shortcut` into the Startup folder
 
 Correct setup:
 
@@ -90,7 +90,6 @@ C:\Apps\ClipPin
 
 Startup folder:
 └── ClipPin Shortcut
-└── _internal/
 ```
 ---
 
