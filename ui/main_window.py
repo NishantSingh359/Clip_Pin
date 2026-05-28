@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QApplication,
     QSizePolicy,
+    QLabel,
 )
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
@@ -13,6 +14,9 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
 )
+import ctypes
+import ctypes.wintypes
+import sys
 
 from core.clipboard_manager import ClipboardManager
 from core.dragdrop_handler import DragDropHandler
@@ -21,7 +25,12 @@ from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
 from config import (
     APP_NAME,
-    BASE_DIR,
+    APP_STORAGE_DIR,
+    EMPTY_STATE_FONT_SIZE,
+    EMPTY_STATE_FONT_WEIGHT,
+    EMPTY_STATE_PADDING,
+    EMPTY_STATE_TEXT,
+    EMPTY_STATE_TEXT_COLOR,
     HIDE_DISTANCE,
     HOVER_TRIGGER_HEIGHT,
     HOVER_TRIGGER_WIDTH,
@@ -82,6 +91,8 @@ class MainWindow(QWidget):
         self._target_pos = None
         self.last_target_window = None
         self.chips_by_content = {}
+        self.is_shelf_pinned = False
+        self._hotkey_was_down = False
 
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -96,9 +107,10 @@ class MainWindow(QWidget):
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
         self.paste_controller = PasteController()
-        self.dragdrop_handler = DragDropHandler(BASE_DIR)
-        self.clipboard_manager = ClipboardManager(BASE_DIR)
+        self.dragdrop_handler = DragDropHandler(APP_STORAGE_DIR)
+        self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
         self.clipboard_manager.text_copied.connect(self.add_clip)
+        self.clipboard_manager.sensitive_text_copied.connect(self.add_sensitive_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
 
         self.animation = QPropertyAnimation(self, b"pos")
@@ -117,6 +129,10 @@ class MainWindow(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.check_mouse_position)
         self.timer.start(MOUSE_POLL_MS)
+
+        self.hotkey_timer = QTimer()
+        self.hotkey_timer.timeout.connect(self.check_toggle_hotkey)
+        self.hotkey_timer.start(50)
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -144,17 +160,43 @@ class MainWindow(QWidget):
         container_layout.addWidget(self.scroll)
 
         main_layout.addWidget(self.container)
+        self.empty_label = QLabel(EMPTY_STATE_TEXT)
+        self.empty_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.empty_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.empty_label.setStyleSheet(f"""
+            QLabel {{
+                color: {EMPTY_STATE_TEXT_COLOR};
+                font-size: {EMPTY_STATE_FONT_SIZE}px;
+                font-weight: {EMPTY_STATE_FONT_WEIGHT};
+                padding: {EMPTY_STATE_PADDING[0]}px {EMPTY_STATE_PADDING[1]}px;
+            }}
+        """)
+        self.chip_layout.addWidget(self.empty_label)
         self.chip_layout.addStretch()
+        self.update_empty_state()
 
     def add_clip(self, content):
         if content in self.chips_by_content:
             return
 
-        chip = ChipWidget(content)
+        self.add_chip(content)
+
+    def add_sensitive_clip(self, content):
+        self.remove_clip(content)
+        self.add_chip(content, sensitive=True)
+        QTimer.singleShot(10 * 60 * 1000, lambda content=content: self.remove_clip(content))
+
+    def add_chip(self, content, sensitive=False):
+        if content in self.chips_by_content:
+            return
+
+        chip = ChipWidget(content, sensitive=sensitive)
         chip.paste_requested.connect(self.paste_clip)
         chip.delete_requested.connect(self.remove_clip)
         chip.pin_requested.connect(self.pin_clip)
+        chip.clear_all_requested.connect(self.clear_unpinned_clips)
         self.chips_by_content[content] = chip
+        self.update_empty_state()
         self.insert_chip(chip)
         QTimer.singleShot(0, chip.animate_entry)
         self.trim_chips()
@@ -168,11 +210,42 @@ class MainWindow(QWidget):
         if not chip:
             return
 
-        # Remove from layout and schedule deletion (prevents stale widgets in UI)
-        if chip.parent() is not None:
-            self.chip_layout.removeWidget(chip)
-        chip.deleteLater()
+        self.clipboard_manager.get_db().delete_by_content(content)
+        self.remove_chip_widget(chip)
 
+    def remove_chip_widget(self, chip):
+        # Remove from layout and schedule deletion (prevents stale widgets in UI)
+        chip.animate_delete(
+            lambda chip=chip: (
+                self.chip_layout.removeWidget(chip),
+                chip.deleteLater(),
+                self.update_empty_state(),
+            )
+        )
+
+    def update_empty_state(self):
+        if hasattr(self, "empty_label"):
+            has_chip_widgets = False
+            for index in range(self.chip_layout.count()):
+                item = self.chip_layout.itemAt(index)
+                widget = item.widget() if item else None
+                if widget and widget is not self.empty_label:
+                    has_chip_widgets = True
+                    break
+            self.empty_label.setVisible(not self.chips_by_content and not has_chip_widgets)
+
+    def clear_unpinned_clips(self):
+        chips = [
+            chip
+            for chip in list(self.chips_by_content.values())
+            if not chip.pinned and not getattr(chip, "_is_deleting", False)
+        ]
+
+        db = self.clipboard_manager.get_db()
+        for chip in chips:
+            self.chips_by_content.pop(chip.content, None)
+            db.delete_by_content(chip.content)
+            self.remove_chip_widget(chip)
 
     def pin_clip(self, content):
         chip = self.chips_by_content.get(content)
@@ -190,6 +263,8 @@ class MainWindow(QWidget):
                 continue
             widget = item.widget()
             if widget is None:
+                continue
+            if widget is getattr(self, "empty_label", None):
                 continue
             if getattr(widget, "pinned", False):
                 pinned_count += 1
@@ -216,12 +291,7 @@ class MainWindow(QWidget):
             if chip is None:
                 return
             self.chips_by_content.pop(chip.content, None)
-            chip.animate_delete(
-                lambda chip=chip: (
-                    self.chip_layout.removeWidget(chip),
-                    chip.deleteLater(),
-                )
-            )
+            self.remove_chip_widget(chip)
 
     def oldest_unpinned_chip(self):
         for index in range(self.chip_layout.count() - 2, -1, -1):
@@ -229,7 +299,12 @@ class MainWindow(QWidget):
             if not item:
                 continue
             chip = item.widget()
-            if chip and not chip.pinned and not getattr(chip, "_is_deleting", False):
+            if (
+                chip
+                and chip is not getattr(self, "empty_label", None)
+                and not getattr(chip, "pinned", False)
+                and not getattr(chip, "_is_deleting", False)
+            ):
                 return chip
         return None
 
@@ -259,7 +334,10 @@ class MainWindow(QWidget):
     # -------------------------
 
     def check_mouse_position(self):
-        self.update_screen_geometry()
+        if self.is_shelf_pinned:
+            return
+
+        self.update_screen_geometry("cursor")
         cursor = QCursor.pos()
         mouse_y = cursor.y()
 
@@ -278,16 +356,47 @@ class MainWindow(QWidget):
             and mouse_y <= self.screen_geometry.top() + HOVER_TRIGGER_HEIGHT
         )
         if is_over_top_edge:
-            self.show_shelf()
+            self.show_shelf("cursor")
 
-    def show_shelf(self):
+    def show_shelf(self, monitor_hint="cursor"):
+        self.update_screen_geometry(monitor_hint)
         self.last_target_window = self.paste_controller.foreground_window()
         self.is_open = True
         self.animate_to(self.open_pos)
 
-    def hide_shelf(self):
+    def hide_shelf(self, force=False):
+        if self.is_shelf_pinned and not force:
+            return
+
         self.is_open = False
         self.animate_to(self.hidden_pos)
+
+    def toggle_shelf_pin(self):
+        self.is_shelf_pinned = not self.is_shelf_pinned
+        if self.is_shelf_pinned:
+            if self.auto_hide_timer.isActive():
+                self.auto_hide_timer.stop()
+            self.show_shelf("active")
+        else:
+            self.hide_shelf(force=True)
+
+    def check_toggle_hotkey(self):
+        is_down = self.is_toggle_hotkey_down()
+        if is_down and not self._hotkey_was_down:
+            self.toggle_shelf_pin()
+        self._hotkey_was_down = is_down
+
+    def is_toggle_hotkey_down(self):
+        if sys.platform != "win32":
+            return False
+
+        ctrl_pressed = (
+            ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
+            or ctypes.windll.user32.GetAsyncKeyState(0xA2) & 0x8000
+            or ctypes.windll.user32.GetAsyncKeyState(0xA3) & 0x8000
+        )
+        space_pressed = ctypes.windll.user32.GetAsyncKeyState(0x20) & 0x8000
+        return bool(ctrl_pressed and space_pressed)
 
     def animate_to(self, target):
         if self._target_pos == target:
@@ -303,8 +412,8 @@ class MainWindow(QWidget):
         self.animation.setEndValue(target)
         self.animation.start()
 
-    def update_screen_geometry(self):
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+    def update_screen_geometry(self, monitor_hint="cursor"):
+        screen = self.screen_for_hint(monitor_hint)
         geometry = screen.availableGeometry()
         width = max(720, int(geometry.width() * SHELF_WIDTH_RATIO))
         width = min(width, geometry.width() - 32)
@@ -321,3 +430,26 @@ class MainWindow(QWidget):
         trigger_half_width = HOVER_TRIGGER_WIDTH // 2
         self.trigger_left = trigger_center - trigger_half_width
         self.trigger_right = trigger_center + trigger_half_width
+
+    def screen_for_hint(self, monitor_hint):
+        if monitor_hint == "active":
+            screen = self.active_window_screen()
+            if screen:
+                return screen
+
+        return QApplication.screenAt(QCursor.pos()) or self.active_window_screen() or QApplication.primaryScreen()
+
+    def active_window_screen(self):
+        if not sys.platform.startswith("win"):
+            return None
+
+        hwnd = self.paste_controller.foreground_window()
+        if not hwnd:
+            return None
+
+        rect = ctypes.wintypes.RECT()
+        if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+
+        center = QPoint((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        return QApplication.screenAt(center)

@@ -1,13 +1,13 @@
 import sys
 from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
-from config import APP_NAME, BASE_DIR
+from config import APP_NAME, APP_STORAGE_DIR
 from core.image_store import ImageStore
 
 app = QApplication(sys.argv)
 app.setApplicationName(APP_NAME)
 
-ImageStore(BASE_DIR).purge_old_thumbnails()
+ImageStore(APP_STORAGE_DIR).purge_old_thumbnails()
 
 window = MainWindow()
 window.show()

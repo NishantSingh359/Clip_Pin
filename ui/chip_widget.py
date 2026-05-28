@@ -63,12 +63,14 @@ class ChipWidget(QWidget):
     paste_requested = Signal(str)
     delete_requested = Signal(str)
     pin_requested = Signal(str)
+    clear_all_requested = Signal()
     favicon_loaded = Signal(bytes)
 
-    def __init__(self, content):
+    def __init__(self, content, sensitive=False):
         super().__init__()
 
         self.content = content
+        self.sensitive = sensitive
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
@@ -199,6 +201,9 @@ class ChipWidget(QWidget):
         self.animate_background_to(CHIP_PRESSED_BACKGROUND, MOTION_FAST_MS)
 
     def detect_kind(self):
+        if self.sensitive:
+            return "TEXT"
+
         content = self.content.strip()
 
         if content.startswith(("http://", "https://")):
@@ -242,6 +247,9 @@ class ChipWidget(QWidget):
         self.setFixedHeight(self._base_height)
 
     def display_text(self):
+        if self.sensitive:
+            return "•" * len(self.content)
+
         content = self.content.strip()
         if self.kind == "LINK":
             domain = urlparse(content).netloc
@@ -628,9 +636,11 @@ class ChipWidget(QWidget):
         pin_label = "unpin" if self.pinned else "pin"
         pin_action = QAction(pin_label, self)
         delete_action = QAction("delete", self)
+        clear_all_action = QAction("clear all", self)
 
         menu.addAction(pin_action)
         menu.addAction(delete_action)
+        menu.addAction(clear_all_action)
 
         menu.setStyleSheet(f'''
             QMenu {{
@@ -656,7 +666,8 @@ class ChipWidget(QWidget):
             self.pin_requested.emit(self.content)
         elif action == delete_action:
             self.delete_requested.emit(self.content)
-            self.animate_delete()
+        elif action == clear_all_action:
+            self.clear_all_requested.emit()
 
     def open_link(self, event):
         if event.button() == Qt.LeftButton and self.kind == "LINK":

@@ -14,7 +14,8 @@ dist/
 data/clips.db
 
 # Thumbnails
-data/thumbnails/
+data
+thumbnails
 
 # VS Code
 .vscode/

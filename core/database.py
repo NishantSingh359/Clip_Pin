@@ -9,13 +9,15 @@ Schema:
 """
 
 
-import sqlite3
+import os
 import re
+import sqlite3
 from pathlib import Path
 
 
 DB_DIR = "data"
 DB_NAME = "clips.db"
+APP_DATA_DIR = "Copy Pin"
 
 
 def get_db_path(base_dir=None):
@@ -26,6 +28,19 @@ def get_db_path(base_dir=None):
         base = Path(__file__).resolve().parent.parent
 
     db_dir = base / DB_DIR
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return str(db_dir / DB_NAME)
+
+
+def get_user_db_path():
+    """Get a writable per-user database path for packaged/renamed installs."""
+    if os.name == "nt":
+        root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    else:
+        root = os.environ.get("XDG_DATA_HOME")
+
+    base = Path(root) if root else Path.home() / ".local" / "share"
+    db_dir = base / APP_DATA_DIR / DB_DIR
     db_dir.mkdir(parents=True, exist_ok=True)
     return str(db_dir / DB_NAME)
 
@@ -85,8 +100,14 @@ class ClipboardDatabase:
     """Database handler for clipboard history."""
 
     def __init__(self, base_dir=None):
-        self.db_path = get_db_path(base_dir)
-        self._init_db()
+        try:
+            self.db_path = get_db_path(base_dir)
+            self._init_db()
+        except (OSError, sqlite3.OperationalError) as exc:
+            if isinstance(exc, sqlite3.OperationalError) and "unable to open database file" not in str(exc).lower():
+                raise
+            self.db_path = get_user_db_path()
+            self._init_db()
 
     def _get_connection(self):
         """Create and return a new database connection."""
