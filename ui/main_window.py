@@ -39,6 +39,10 @@ from config import (
     MOUSE_POLL_MS,
     MOTION_ENABLED,
     MOTION_SHELF_MS,
+    SHELF_CHIP_REVEAL_ENABLED,
+    SHELF_CHIP_REVEAL_MS,
+    SHELF_CHIP_REVEAL_STAGGER_MS,
+    SHELF_CHIP_REVEAL_OFFSET,
     SHELF_HEIGHT,
     SHELF_TOP_MARGIN,
     SHELF_WIDTH_RATIO,
@@ -111,7 +115,6 @@ class MainWindow(QWidget):
         self.dragdrop_handler = DragDropHandler(APP_STORAGE_DIR)
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
         self.clipboard_manager.text_copied.connect(self.add_clip)
-        self.clipboard_manager.sensitive_text_copied.connect(self.add_sensitive_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
 
         self.animation = QPropertyAnimation(self, b"pos")
@@ -182,16 +185,11 @@ class MainWindow(QWidget):
 
         self.add_chip(content)
 
-    def add_sensitive_clip(self, content):
-        self.remove_clip(content)
-        self.add_chip(content, sensitive=True)
-        QTimer.singleShot(10 * 60 * 1000, lambda content=content: self.remove_clip(content))
-
-    def add_chip(self, content, sensitive=False):
+    def add_chip(self, content):
         if content in self.chips_by_content:
             return
 
-        chip = ChipWidget(content, sensitive=sensitive)
+        chip = ChipWidget(content)
         chip.paste_requested.connect(self.paste_clip)
         chip.delete_requested.connect(self.remove_clip)
         chip.pin_requested.connect(self.pin_clip)
@@ -199,7 +197,10 @@ class MainWindow(QWidget):
         self.chips_by_content[content] = chip
         self.update_empty_state()
         self.insert_chip(chip)
-        QTimer.singleShot(0, chip.animate_entry)
+        # Animations removed: immediately ensure chip is visible at its base width
+        chip.setMinimumWidth(chip._base_width)
+        chip.setMaximumWidth(chip._base_width)
+        chip.show()
         self.trim_chips()
 
     def add_clips(self, contents):
@@ -216,13 +217,10 @@ class MainWindow(QWidget):
 
     def remove_chip_widget(self, chip):
         # Remove from layout and schedule deletion (prevents stale widgets in UI)
-        chip.animate_delete(
-            lambda chip=chip: (
-                self.chip_layout.removeWidget(chip),
-                chip.deleteLater(),
-                self.update_empty_state(),
-            )
-        )
+        # Animations removed: remove immediately
+        self.chip_layout.removeWidget(chip)
+        chip.deleteLater()
+        self.update_empty_state()
 
     def update_empty_state(self):
         if hasattr(self, "empty_label"):
@@ -375,6 +373,8 @@ class MainWindow(QWidget):
         self.update_screen_geometry(monitor_hint)
         self.last_target_window = self.paste_controller.foreground_window()
         self.is_open = True
+        if SHELF_CHIP_REVEAL_ENABLED:
+            self.reveal_chips()
         self.animate_to(self.open_pos)
 
     def hide_shelf(self, force=False):
@@ -383,6 +383,18 @@ class MainWindow(QWidget):
 
         self.is_open = False
         self.animate_to(self.hidden_pos)
+
+    def reveal_chips(self):
+        # Animations removed: ensure all chips are visible immediately
+        for index in range(self.chip_layout.count()):
+            item = self.chip_layout.itemAt(index)
+            chip = item.widget() if item else None
+            if chip is None or chip is getattr(self, "empty_label", None):
+                continue
+            chip.setVisible(True)
+            if hasattr(chip, "_base_width"):
+                chip.setMinimumWidth(chip._base_width)
+                chip.setMaximumWidth(chip._base_width)
 
     def toggle_shelf_pin(self):
         self.is_shelf_pinned = not self.is_shelf_pinned

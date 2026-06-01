@@ -79,22 +79,46 @@ def fade(widget, start, end, duration, easing=QEasingCurve.OutQuad, finished=Non
     return animate_property(widget, effect, b"opacity", start, end, duration, easing, finished)
 
 
-def slide_and_fade_in(widget, offset=QPoint(0, 4), duration=140):
+def expand_and_fade_in(widget, target_width, duration=140):
     if not MOTION_ENABLED:
+        widget.setMinimumWidth(target_width)
+        widget.setMaximumWidth(target_width)
         widget.show()
         return
 
+    widget.hide()
+    widget.setMinimumWidth(0)
+    widget.setMaximumWidth(0)
+
     effect = QGraphicsOpacityEffect(widget)
     widget.setGraphicsEffect(effect)
+    effect.setOpacity(0.0)
+
     opacity_animation = QPropertyAnimation(effect, b"opacity", widget)
     opacity_animation.setDuration(duration)
     opacity_animation.setStartValue(0.0)
     opacity_animation.setEndValue(1.0)
     opacity_animation.setEasingCurve(QEasingCurve.OutQuad)
 
-    opacity_animation.finished.connect(lambda: widget.setGraphicsEffect(None))
-    remember_animation(widget, opacity_animation)
-    opacity_animation.start()
+    width_animation = QPropertyAnimation(widget, b"maximumWidth", widget)
+    width_animation.setDuration(duration)
+    width_animation.setStartValue(0)
+    width_animation.setEndValue(target_width)
+    width_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+    group = QParallelAnimationGroup(widget)
+    group.addAnimation(opacity_animation)
+    group.addAnimation(width_animation)
+
+    def finish_animation():
+        widget.setGraphicsEffect(None)
+        widget.setMinimumWidth(target_width)
+        widget.setMaximumWidth(target_width)
+
+    group.finished.connect(finish_animation)
+    remember_animation(widget, group)
+    widget.show()
+    group.start()
 
 
 def fade_and_collapse(widget, width, duration=140, finished=None):

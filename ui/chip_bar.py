@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import QScrollArea, QSizePolicy
 
-from config import MOTION_ENABLED, MOTION_SCROLL_MS
+from config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS
 
 
 class ChipBar(QScrollArea):
@@ -21,7 +21,7 @@ class ChipBar(QScrollArea):
 
         self._scroll_animation = QPropertyAnimation(self.horizontalScrollBar(), b"value", self)
         self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._scroll_animation.setDuration(MOTION_SCROLL_MS)
+        self._scroll_animation.setDuration(CHIP_SCROLL_DURATION_MS)
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y() or event.angleDelta().x()
@@ -29,7 +29,7 @@ class ChipBar(QScrollArea):
             return
 
         scrollbar = self.horizontalScrollBar()
-        target = scrollbar.value() - delta
+        target = scrollbar.value() - int(delta * CHIP_SCROLL_SPEED)
         target = max(scrollbar.minimum(), min(scrollbar.maximum(), target))
 
         if not MOTION_ENABLED:

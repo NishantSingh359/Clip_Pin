@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import Property, Qt, QUrl, Signal
+from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QFont,
     QFontMetrics,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
     QPolygon,
@@ -46,16 +47,14 @@ from config import (
     FOLDER_ICON_SIZE,
     OPEN_ICON_COLOR,
     FOLDER_ICON_COLOR,
+    THUMBNAIL_BORDER_RADIUS,
     MOTION_BASE_MS,
     MOTION_FAST_MS,
     MOTION_HOVER_MS,
 )
 from ui.animations import (
-    animate_property,
     color_to_rgba,
-    fade_and_collapse,
     parse_color,
-    slide_and_fade_in,
 )
 
 
@@ -66,11 +65,10 @@ class ChipWidget(QWidget):
     clear_all_requested = Signal()
     favicon_loaded = Signal(bytes)
 
-    def __init__(self, content, sensitive=False):
+    def __init__(self, content):
         super().__init__()
 
         self.content = content
-        self.sensitive = sensitive
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
@@ -173,37 +171,30 @@ class ChipWidget(QWidget):
         return parse_color(CHIP_DEFAULT_BACKGROUND)
 
     def animate_background_to(self, color, duration=MOTION_HOVER_MS):
-        animate_property(
-            self,
-            self,
-            b"backgroundColor",
-            self._background_color,
-            parse_color(color),
-            duration,
-        )
+        # Animations removed: immediately apply background color
+        self._background_color = parse_color(color)
+        self.apply_style()
 
-    def animate_entry(self):
-        slide_and_fade_in(self, duration=MOTION_BASE_MS)
+    def animate_entry(self, duration=MOTION_BASE_MS):
+        # Animations removed: immediately set to base width and show
+        self.setMinimumWidth(self._base_width)
+        self.setMaximumWidth(self._base_width)
+        self.show()
 
     def animate_delete(self, finished=None):
+        # Animations removed: immediately call finished (or delete)
         if self._is_deleting:
             return
-
         self._is_deleting = True
-        fade_and_collapse(
-            self,
-            max(self.width(), self._base_width),
-            duration=MOTION_BASE_MS,
-            finished=finished or self.deleteLater,
-        )
+        if finished:
+            finished()
+        else:
+            self.deleteLater()
 
     def animate_press(self):
         self.animate_background_to(CHIP_PRESSED_BACKGROUND, MOTION_FAST_MS)
 
     def detect_kind(self):
-        if self.sensitive:
-            return "TEXT"
-
         content = self.content.strip()
 
         if content.startswith(("http://", "https://")):
@@ -247,9 +238,6 @@ class ChipWidget(QWidget):
         self.setFixedHeight(self._base_height)
 
     def display_text(self):
-        if self.sensitive:
-            return "•" * len(self.content)
-
         content = self.content.strip()
         if self.kind == "LINK":
             domain = urlparse(content).netloc
@@ -269,10 +257,21 @@ class ChipWidget(QWidget):
             self.icon.setText("I")
             return
 
-        self.icon.setFixedSize(26, 22)
-        self.icon.setPixmap(
-            pixmap.scaled(26, 22, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        )
+        thumb_size = QSize(26, 22)
+        scaled = pixmap.scaled(thumb_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        rounded = QPixmap(thumb_size)
+        rounded.fill(Qt.transparent)
+
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, thumb_size.width(), thumb_size.height(), THUMBNAIL_BORDER_RADIUS, THUMBNAIL_BORDER_RADIUS)
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, scaled)
+        painter.end()
+
+        self.icon.setFixedSize(thumb_size)
+        self.icon.setPixmap(rounded)
 
     def domain(self):
         return urlparse(self.content).netloc.removeprefix("www.").lower()

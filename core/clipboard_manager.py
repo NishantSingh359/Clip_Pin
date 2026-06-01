@@ -1,74 +1,15 @@
-import math
-import re
 from hashlib import sha256
 
-from PySide6.QtCore import QObject, QBuffer, QByteArray, Signal
+from PySide6.QtCore import QObject, QBuffer, Signal
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QClipboard
 
 from core.image_store import ImageStore
-from core.database import ClipboardDatabase, detect_type
-
-
-def is_sensitive_text(text):
-    value = text.strip()
-    lowered = value.lower()
-
-    if not value:
-        return False
-
-    if detect_type(value) in ("link", "path", "img"):
-        return False
-
-    if re.fullmatch(r"\d{4,32}", value):
-        return True
-
-    sensitive_words = (
-        "otp",
-        "one-time",
-        "one time",
-        "verification code",
-        "security code",
-        "password",
-        "passcode",
-        "passwd",
-        "pwd",
-        "secret",
-        "token",
-    )
-    if any(word in lowered for word in sensitive_words):
-        return True
-
-    if re.search(r"\s", value):
-        return False
-
-    if 8 <= len(value) <= 128:
-        has_letter = any(ch.isalpha() for ch in value)
-        has_digit = any(ch.isdigit() for ch in value)
-        has_symbol = any(not ch.isalnum() for ch in value)
-        category_count = sum((has_letter, has_digit, has_symbol))
-
-        if category_count >= 2:
-            return True
-
-        if value.isalpha() and len(set(value.lower())) >= 5:
-            return True
-
-        if has_letter and len(value) >= 14 and text_entropy(value) >= 3.0:
-            return True
-
-    return False
-
-
-def text_entropy(text):
-    counts = {ch: text.count(ch) for ch in set(text)}
-    length = len(text)
-    return -sum((count / length) * math.log2(count / length) for count in counts.values())
+from core.database import ClipboardDatabase
 
 
 class ClipboardManager(QObject):
     text_copied = Signal(str)
-    sensitive_text_copied = Signal(str)
     image_copied = Signal(str)
 
     def __init__(self, base_dir):
@@ -133,11 +74,6 @@ class ClipboardManager(QObject):
             return
 
         self._last_text = text
-        if is_sensitive_text(text):
-            self.db.delete_by_content(text)
-            self.sensitive_text_copied.emit(text)
-            return
-
         self.db.insert(text)
         self.text_copied.emit(text)
 
