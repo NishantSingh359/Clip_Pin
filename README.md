@@ -23,15 +23,12 @@ https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
 
 ### Download ClipPin
 
-1. Open the ClipPin GitHub page
-2. Go to: Releases → Latest Release
-3. Download: `ClipPin-v1.0.zip`
+1. Go to: Releases → Latest Release
+2. Download: `ClipPin-v1.0.zip`
 
 ---
 
 ### Extract The ZIP
-
-IMPORTANT: Do NOT run the app directly from inside the ZIP file.
 
 1. Right click: `ClipPin-v1.0.zip`
 2. Click: Extract All
@@ -43,12 +40,7 @@ After extraction you should see:
 ClipPin/
 ├── ClipPin.exe
 ├── _internal/
-└── assets/
 ```
-
-*IMPORTANT:*
-- Do NOT delete or move the `_internal` folder.
-- ClipPin requires all files inside the extracted folder.
 
 ---
 
@@ -86,10 +78,7 @@ To launch ClipPin automatically when Windows starts:
 
 4. Create a shortcut of: `ClipPin.exe`
 
-5. Move ONLY the shortcut into the Startup folder
-
-*IMPORTANT:*
-- Do NOT move the actual ClipPin folder into Startup.
+5. Move the `shortcut` and copy `_internal` folder into the Startup folder
 
 Correct setup:
 
@@ -99,30 +88,10 @@ C:\Apps\ClipPin
 ├── _internal/
 
 Startup folder:
-└── ClipPin Shortcut.lnk
+├── ClipPin Shortcut
+├── _internal/
+
 ```
----
-
-### App Does Not Open
-
-Make sure:
-
-- `_internal` folder exists
-- assets folder exists
-- app is fully extracted from ZIP
-
-Do NOT run directly from ZIP archive.
-
----
-
-### Missing DLL Error
-
-This happens if:
-
-- EXE was moved without `_internal`
-
-Fix: Restore the complete ClipPin folder structure.
-
 ---
 
 ### Recommended System
