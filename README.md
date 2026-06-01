@@ -11,7 +11,6 @@ Copy Pin is a small clipboard history shelf for **PySide6 / Qt**. It lets you co
 - Delete chips
 - Auto-hides shelf when you move away
 - Use [CTRAL + SPACE] to pin/unpin shelf
-- Password and OTP are protected and delete after 10 mins
 - Max 100 copy limit
 
 ---
