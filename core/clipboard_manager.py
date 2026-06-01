@@ -4,7 +4,7 @@ from hashlib import sha256
 
 from PySide6.QtCore import QObject, QBuffer, QByteArray, Signal
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QClipboard
 
 from core.image_store import ImageStore
 from core.database import ClipboardDatabase, detect_type
@@ -89,7 +89,7 @@ class ClipboardManager(QObject):
     def set_text_for_paste(self, text):
         self._ignore_next = True
         self._last_text = text
-        self.clipboard.setText(text)
+        self.clipboard.setText(text, QClipboard.Clipboard)
 
     def set_image_for_paste(self, image_path):
         image = QImage(image_path)
@@ -98,7 +98,7 @@ class ClipboardManager(QObject):
 
         self._ignore_next = True
         self._last_image_cache_key = image.cacheKey()
-        self.clipboard.setImage(image)
+        self.clipboard.setImage(image, QClipboard.Clipboard)
         return True
 
     def on_data_changed(self):

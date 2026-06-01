@@ -17,6 +17,7 @@ from PySide6.QtGui import (
 import ctypes
 import ctypes.wintypes
 import sys
+from pathlib import Path
 
 from core.clipboard_manager import ClipboardManager
 from core.dragdrop_handler import DragDropHandler
@@ -327,7 +328,19 @@ class MainWindow(QWidget):
             return
 
         self.add_clips(items)
+        self._set_clipboard_for_drop(items)
         event.acceptProposedAction()
+
+    def _set_clipboard_for_drop(self, items):
+        if not items:
+            return
+
+        content = items[-1]
+
+        if Path(content).exists() and self.clipboard_manager.set_image_for_paste(content):
+            return
+
+        self.clipboard_manager.set_text_for_paste(content)
 
     # -------------------------
     # HOVER DETECTION
