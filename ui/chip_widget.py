@@ -36,6 +36,7 @@ from config import (
     CHIP_MIN_WIDTH,
     CHIP_HEIGHT,
     CONTEXT_MENU_BACKGROUND_COLOR,
+    CONTEXT_MENU_BORDER_WIDTH,
     CONTEXT_MENU_TEXT_COLOR,
     CONTEXT_MENU_BORDER_COLOR,
     CONTEXT_MENU_HOVER_COLOR,
@@ -632,10 +633,10 @@ class ChipWidget(QWidget):
 
     def show_context_menu(self, position):
         menu = QMenu(self)
-        pin_label = "unpin" if self.pinned else "pin"
+        pin_label = "Unpin" if self.pinned else "Pin"
         pin_action = QAction(pin_label, self)
-        delete_action = QAction("delete", self)
-        clear_all_action = QAction("clear all", self)
+        delete_action = QAction("Delete", self)
+        clear_all_action = QAction("Clear All", self)
 
         menu.addAction(pin_action)
         menu.addAction(delete_action)
@@ -645,7 +646,7 @@ class ChipWidget(QWidget):
             QMenu {{
                 background-color: {CONTEXT_MENU_BACKGROUND_COLOR};
                 color: {CONTEXT_MENU_TEXT_COLOR};
-                border: 1px solid {CONTEXT_MENU_BORDER_COLOR};
+                border: {CONTEXT_MENU_BORDER_WIDTH}px solid {CONTEXT_MENU_BORDER_COLOR};
                 border-radius: {CONTEXT_MENU_BORDER_RADIUS}px;
                 padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
             }}
