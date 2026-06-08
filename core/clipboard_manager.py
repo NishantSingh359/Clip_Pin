@@ -1,4 +1,6 @@
 from hashlib import sha256
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from PySide6.QtCore import QObject, QBuffer, Signal
 from PySide6.QtWidgets import QApplication
@@ -6,6 +8,7 @@ from PySide6.QtGui import QImage, QClipboard
 
 from core.image_store import ImageStore
 from core.database import ClipboardDatabase
+from utils.app_logging import log_exception, safe_slot
 
 
 class ClipboardManager(QObject):
@@ -21,6 +24,8 @@ class ClipboardManager(QObject):
         self._last_image_cache_key = None
         self._last_image_hash = None
         self._ignore_next = False
+        self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
+        self._image_lock = Lock()
         self.clipboard.dataChanged.connect(self.on_data_changed)
 
     def get_db(self):
@@ -33,15 +38,20 @@ class ClipboardManager(QObject):
         self.clipboard.setText(text, QClipboard.Clipboard)
 
     def set_image_for_paste(self, image_path):
-        image = QImage(image_path)
-        if image.isNull():
+        try:
+            image = QImage(image_path)
+            if image.isNull():
+                return False
+
+            self._ignore_next = True
+            self._last_image_cache_key = image.cacheKey()
+            self.clipboard.setImage(image, QClipboard.Clipboard)
+            return True
+        except Exception:
+            log_exception("Failed to set image for paste")
             return False
 
-        self._ignore_next = True
-        self._last_image_cache_key = image.cacheKey()
-        self.clipboard.setImage(image, QClipboard.Clipboard)
-        return True
-
+    @safe_slot("Failed to process clipboard change")
     def on_data_changed(self):
         if self._ignore_next:
             self._ignore_next = False
@@ -53,16 +63,12 @@ class ClipboardManager(QObject):
             if image.isNull():
                 return
 
-            image_hash = self._hash_image(image)
             cache_key = image.cacheKey()
-            if image_hash and image_hash != self._last_image_hash:
-                self._last_image_hash = image_hash
-                self._last_image_cache_key = cache_key
-                image_path = self.image_store.save_image(image, "screenshot")
-                if image_path:
-                    # store in DB as type='img' (content column holds image path)
-                    self.db.insert_with_type(image_path, "img")
-                    self.image_copied.emit(image_path)
+            if cache_key == self._last_image_cache_key:
+                return
+
+            self._last_image_cache_key = cache_key
+            self._image_executor.submit(self._process_image, image.copy())
             return
 
 
@@ -74,8 +80,32 @@ class ClipboardManager(QObject):
             return
 
         self._last_text = text
-        self.db.insert(text)
-        self.text_copied.emit(text)
+        try:
+            self.db.insert(text)
+            self.text_copied.emit(text)
+        except Exception:
+            log_exception("Failed to store text clipboard item")
+
+    def _process_image(self, image):
+        try:
+            image_hash = self._hash_image(image)
+            if not image_hash:
+                return
+
+            with self._image_lock:
+                if image_hash == self._last_image_hash:
+                    return
+
+            image_path = self.image_store.save_image(image, "screenshot")
+            if not image_path:
+                return
+
+            self.db.insert_with_type(image_path, "img")
+            with self._image_lock:
+                self._last_image_hash = image_hash
+            self.image_copied.emit(image_path)
+        except Exception:
+            log_exception("Failed to process clipboard image")
 
     def _hash_image(self, image):
         buffer = QBuffer()
@@ -84,3 +114,6 @@ class ClipboardManager(QObject):
             return None
         data = bytes(buffer.data())
         return sha256(data).hexdigest()
+
+    def close(self):
+        self._image_executor.shutdown(wait=False, cancel_futures=True)

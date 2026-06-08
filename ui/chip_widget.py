@@ -1,9 +1,6 @@
 import os
-import re
-import threading
 from pathlib import Path
-from urllib.parse import quote, urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize
 from PySide6.QtGui import (
@@ -53,6 +50,8 @@ from config import (
     MOTION_FAST_MS,
     MOTION_HOVER_MS,
 )
+from core.favicon_service import get_favicon_service
+from utils.app_logging import log_exception, safe_slot
 from ui.animations import (
     color_to_rgba,
     parse_color,
@@ -73,9 +72,6 @@ class ChipWidget(QWidget):
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
-        self._favicon_thread = None
-        self._favicon_urls = []
-        self._favicon_index = 0
         self._destroyed = False
         self._background_color = parse_color(CHIP_DEFAULT_BACKGROUND)
         self._is_hovered = False
@@ -392,91 +388,20 @@ class ChipWidget(QWidget):
         return QPoint(x, y)
 
     def load_favicon(self):
-        domain = urlparse(self.content).netloc
-        if not domain:
+        try:
+            get_favicon_service().request(self.content, self._emit_favicon_loaded)
+        except Exception:
+            log_exception("Failed to request favicon")
+
+    def _emit_favicon_loaded(self, data):
+        if self._destroyed:
+            return
+        try:
+            self.favicon_loaded.emit(data)
+        except RuntimeError:
             return
 
-        self._favicon_thread = threading.Thread(
-            target=self.fetch_favicon_bytes,
-            args=(self.content, domain),
-            daemon=True,
-        )
-        self._favicon_thread.start()
-
-    def fetch_favicon_bytes(self, url, domain):
-        for favicon_url in self.favicon_candidates(url, domain):
-            if self._destroyed:
-                return
-            data = self.download_favicon(favicon_url)
-            if data:
-                if self._destroyed:
-                    return
-                try:
-                    self.favicon_loaded.emit(data)
-                except RuntimeError:
-                    return
-                return
-
-    def favicon_candidates(self, url, domain):
-        quoted_url = quote(url, safe="")
-        candidates = [
-            f"https://www.google.com/s2/favicons?domain_url={quoted_url}&sz=64",
-            f"https://www.google.com/s2/favicons?domain={domain}&sz=64",
-            f"https://icons.duckduckgo.com/ip3/{domain}.ico",
-            f"https://{domain}/favicon.ico",
-            f"http://{domain}/favicon.ico",
-        ]
-
-        page_icons = self.discover_page_icons(f"https://{domain}")
-        if not page_icons:
-            page_icons = self.discover_page_icons(f"http://{domain}")
-
-        return page_icons + candidates
-
-    def discover_page_icons(self, page_url):
-        try:
-            request = Request(
-                page_url,
-                headers={"User-Agent": "Mozilla/5.0 CopyPin/1.0"},
-            )
-            with urlopen(request, timeout=4) as response:
-                html = response.read(180_000).decode("utf-8", errors="ignore")
-        except Exception:
-            return []
-
-        icon_urls = []
-        for match in re.finditer(r"<link\b[^>]*>", html, flags=re.IGNORECASE):
-            tag = match.group(0)
-            rel = re.search(r"""rel=["']?([^"'>\s]+)["']?""", tag, flags=re.IGNORECASE)
-            href = re.search(r"""href=["']?([^"'>\s]+)["']?""", tag, flags=re.IGNORECASE)
-            if not rel or not href:
-                continue
-            if "icon" not in rel.group(1).lower():
-                continue
-            icon_urls.append(urljoin(page_url, href.group(1)))
-
-        return icon_urls[:4]
-
-    def download_favicon(self, favicon_url):
-        try:
-            request = Request(
-                favicon_url,
-                headers={"User-Agent": "Mozilla/5.0 CopyPin/1.0"},
-            )
-            with urlopen(request, timeout=5) as response:
-                content_type = response.headers.get("content-type", "").lower()
-                data = response.read(300_000)
-        except Exception:
-            return None
-
-        looks_like_image = (
-            "image/" in content_type
-            or favicon_url.lower().split("?")[0].endswith((".ico", ".png", ".jpg", ".jpeg", ".webp", ".gif"))
-        )
-        if len(data) > 64 and looks_like_image:
-            return data
-        return None
-
+    @safe_slot("Failed to apply favicon data")
     def on_favicon_data_loaded(self, data):
         if self._destroyed:
             return

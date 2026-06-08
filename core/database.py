@@ -12,7 +12,10 @@ Schema:
 import os
 import re
 import sqlite3
+import time
 from pathlib import Path
+
+from config import DB_BUSY_TIMEOUT_MS, DB_RETRY_DELAY_MS, DB_WRITE_RETRIES
 
 
 DB_DIR = "data"
@@ -111,10 +114,38 @@ class ClipboardDatabase:
 
     def _get_connection(self):
         """Create and return a new database connection."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=DB_BUSY_TIMEOUT_MS / 1000)
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
+
+    def _is_locked_error(self, exc):
+        message = str(exc).lower()
+        return "locked" in message or "busy" in message
+
+    def _write_with_retry(self, operation):
+        for attempt in range(DB_WRITE_RETRIES + 1):
+            conn = None
+            try:
+                conn = self._get_connection()
+                result = operation(conn)
+                conn.commit()
+                return result
+            except sqlite3.OperationalError as exc:
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
+                if not self._is_locked_error(exc) or attempt >= DB_WRITE_RETRIES:
+                    raise
+                time.sleep(DB_RETRY_DELAY_MS / 1000)
+            finally:
+                if conn is not None:
+                    conn.close()
+        return None
 
     def _init_db(self):
         """Initialize the database schema."""
@@ -150,17 +181,15 @@ class ClipboardDatabase:
             The row id of the inserted record, or None if it already exists.
         """
         clip_type = detect_type(content)
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO clips (type, content) VALUES (?, ?)",
                 (clip_type, content)
             )
-            conn.commit()
             # cursor.rowcount is 0 when INSERT OR IGNORE skips a duplicate
             return cursor.lastrowid if cursor.rowcount > 0 else None
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def insert_with_type(self, content: str, clip_type: str) -> int | None:
         """
@@ -180,17 +209,15 @@ class ClipboardDatabase:
 
 
 
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO clips (type, content) VALUES (?, ?)",
                 (clip_type, content)
             )
-            conn.commit()
             # cursor.rowcount is 0 when INSERT OR IGNORE skips a duplicate
             return cursor.lastrowid if cursor.rowcount > 0 else None
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def get_all(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """
@@ -296,13 +323,11 @@ class ClipboardDatabase:
         Returns:
             True if a record was deleted, False otherwise.
         """
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute("DELETE FROM clips WHERE id = ?", (record_id,))
-            conn.commit()
             return cursor.rowcount > 0
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def delete_by_content(self, content: str) -> bool:
         """
@@ -314,13 +339,11 @@ class ClipboardDatabase:
         Returns:
             True if a record was deleted, False otherwise.
         """
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute("DELETE FROM clips WHERE content = ?", (content,))
-            conn.commit()
             return cursor.rowcount > 0
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def purge_old_records(self, retention_days: int = 30) -> int:
         """
@@ -335,16 +358,14 @@ class ClipboardDatabase:
         Returns:
             Number of deleted records.
         """
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute(
                 "DELETE FROM clips WHERE created_at < datetime('now', 'localtime', ?)",
                 (f"-{retention_days} days",)
             )
-            conn.commit()
             return cursor.rowcount
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def clear(self) -> int:
         """
@@ -353,13 +374,11 @@ class ClipboardDatabase:
         Returns:
             Number of deleted records.
         """
-        conn = self._get_connection()
-        try:
+        def operation(conn):
             cursor = conn.execute("DELETE FROM clips")
-            conn.commit()
             return cursor.rowcount
-        finally:
-            conn.close()
+
+        return self._write_with_retry(operation)
 
     def get_stats(self) -> dict:
         """
@@ -375,7 +394,8 @@ class ClipboardDatabase:
             links = conn.execute("SELECT COUNT(*) as c FROM clips WHERE type='link'").fetchone()["c"]
             texts = conn.execute("SELECT COUNT(*) as c FROM clips WHERE type='text'").fetchone()["c"]
             paths = conn.execute("SELECT COUNT(*) as c FROM clips WHERE type='path'").fetchone()["c"]
-            return {"total": total, "links": links, "texts": texts, "paths": paths}
+            imgs = conn.execute("SELECT COUNT(*) as c FROM clips WHERE type='img'").fetchone()["c"]
+            return {"total": total, "links": links, "texts": texts, "paths": paths, "imgs": imgs}
         finally:
             conn.close()
 

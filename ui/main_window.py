@@ -21,6 +21,7 @@ from pathlib import Path
 
 from core.clipboard_manager import ClipboardManager
 from core.dragdrop_handler import DragDropHandler
+from core.favicon_service import shutdown_favicon_service
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
@@ -55,6 +56,7 @@ from config import (
     SHELF_SPACING,
     SHELF_AUTO_HIDE_DELAY
 )
+from utils.app_logging import log_exception, safe_slot
 
 
 class ShelfContainer(QWidget):
@@ -98,6 +100,7 @@ class MainWindow(QWidget):
         self.chips_by_content = {}
         self.is_shelf_pinned = False
         self._hotkey_was_down = False
+        self._screen_geometry_cache_key = None
 
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -179,12 +182,14 @@ class MainWindow(QWidget):
         self.chip_layout.addStretch()
         self.update_empty_state()
 
+    @safe_slot("Failed to add clipboard chip")
     def add_clip(self, content):
         if content in self.chips_by_content:
             return
 
         self.add_chip(content)
 
+    @safe_slot("Failed to create clipboard chip")
     def add_chip(self, content):
         if content in self.chips_by_content:
             return
@@ -207,12 +212,16 @@ class MainWindow(QWidget):
         for content in contents:
             self.add_clip(content)
 
+    @safe_slot("Failed to remove clipboard chip")
     def remove_clip(self, content):
         chip = self.chips_by_content.pop(content, None)
         if not chip:
             return
 
-        self.clipboard_manager.get_db().delete_by_content(content)
+        try:
+            self.clipboard_manager.get_db().delete_by_content(content)
+        except Exception:
+            log_exception("Failed to delete clipboard item")
         self.remove_chip_widget(chip)
 
     def remove_chip_widget(self, chip):
@@ -233,6 +242,7 @@ class MainWindow(QWidget):
                     break
             self.empty_label.setVisible(not self.chips_by_content and not has_chip_widgets)
 
+    @safe_slot("Failed to clear unpinned clips")
     def clear_unpinned_clips(self):
         chips = [
             chip
@@ -243,9 +253,13 @@ class MainWindow(QWidget):
         db = self.clipboard_manager.get_db()
         for chip in chips:
             self.chips_by_content.pop(chip.content, None)
-            db.delete_by_content(chip.content)
+            try:
+                db.delete_by_content(chip.content)
+            except Exception:
+                log_exception("Failed to delete clipboard item during clear")
             self.remove_chip_widget(chip)
 
+    @safe_slot("Failed to pin clipboard chip")
     def pin_clip(self, content):
         chip = self.chips_by_content.get(content)
         if not chip:
@@ -271,6 +285,7 @@ class MainWindow(QWidget):
                 break
         self.chip_layout.insertWidget(pinned_count, chip)
 
+    @safe_slot("Failed to paste clipboard chip")
     def paste_clip(self, content):
         self.hide_shelf()
         chip = self.chips_by_content.get(content)
@@ -284,6 +299,7 @@ class MainWindow(QWidget):
             lambda: self.paste_controller.paste_text(content, self.last_target_window)
         )
 
+    @safe_slot("Failed to trim chips")
     def trim_chips(self):
         while len(self.chips_by_content) > MAX_CHIPS:
             chip = self.oldest_unpinned_chip()
@@ -307,18 +323,21 @@ class MainWindow(QWidget):
                 return chip
         return None
 
+    @safe_slot("Failed to process drag enter")
     def dragEnterEvent(self, event):
         if self.dragdrop_handler.can_accept(event.mimeData()):
             event.acceptProposedAction()
         else:
             event.ignore()
 
+    @safe_slot("Failed to process drag move")
     def dragMoveEvent(self, event):
         if self.dragdrop_handler.can_accept(event.mimeData()):
             event.acceptProposedAction()
         else:
             event.ignore()
 
+    @safe_slot("Failed to process drop")
     def dropEvent(self, event):
         items = self.dragdrop_handler.extract_items(event.mimeData())
         if not items:
@@ -344,6 +363,7 @@ class MainWindow(QWidget):
     # HOVER DETECTION
     # -------------------------
 
+    @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
         if self.is_shelf_pinned:
             return
@@ -405,12 +425,14 @@ class MainWindow(QWidget):
         else:
             self.hide_shelf(force=True)
 
+    @safe_slot("Failed to check toggle hotkey")
     def check_toggle_hotkey(self):
         is_down = self.is_toggle_hotkey_down()
         if is_down and not self._hotkey_was_down:
             self.toggle_shelf_pin()
         self._hotkey_was_down = is_down
 
+    @safe_slot("Failed to inspect toggle hotkey")
     def is_toggle_hotkey_down(self):
         if sys.platform != "win32":
             return False
@@ -440,6 +462,17 @@ class MainWindow(QWidget):
     def update_screen_geometry(self, monitor_hint="cursor"):
         screen = self.screen_for_hint(monitor_hint)
         geometry = screen.availableGeometry()
+        cache_key = (
+            screen.name(),
+            geometry.left(),
+            geometry.top(),
+            geometry.width(),
+            geometry.height(),
+        )
+        if cache_key == self._screen_geometry_cache_key:
+            return
+
+        self._screen_geometry_cache_key = cache_key
         width = max(720, int(geometry.width() * SHELF_WIDTH_RATIO))
         width = min(width, geometry.width() - 32)
 
@@ -478,3 +511,13 @@ class MainWindow(QWidget):
 
         center = QPoint((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
         return QApplication.screenAt(center)
+
+    def shutdown(self):
+        try:
+            self.clipboard_manager.close()
+        except Exception:
+            log_exception("Failed to shut down clipboard manager")
+        try:
+            shutdown_favicon_service()
+        except Exception:
+            log_exception("Failed to shut down favicon service")

@@ -2,9 +2,17 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from config import THUMBNAILS_DIR, THUMBNAIL_RETENTION_DAYS, THUMBNAIL_PURGE_PREFIXES
+from config import (
+    MAX_STORED_IMAGE_BYTES,
+    MAX_STORED_IMAGE_DIMENSION,
+    THUMBNAILS_DIR,
+    THUMBNAIL_RETENTION_DAYS,
+    THUMBNAIL_PURGE_PREFIXES,
+)
+from utils.app_logging import log_exception
 
 
 
@@ -47,10 +55,14 @@ class ImageStore:
         if image is None or image.isNull():
             return None
 
+        image = self._bounded_image(image)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = self.thumbnail_dir / f"{prefix}_{stamp}_{uuid4().hex[:8]}.png"
-        if image.save(str(path), "PNG"):
-            return str(path)
+        try:
+            if image.save(str(path), "PNG"):
+                return str(path)
+        except Exception:
+            log_exception("Failed to save image thumbnail")
         return None
 
     def _as_image(self, image_data):
@@ -61,3 +73,22 @@ class ImageStore:
             return image_data.toImage()
 
         return None
+
+    def _bounded_image(self, image):
+        max_dimension = max(1, MAX_STORED_IMAGE_DIMENSION)
+        if image.width() > max_dimension or image.height() > max_dimension:
+            image = image.scaled(max_dimension, max_dimension, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+        size_in_bytes = self._size_in_bytes(image)
+        if size_in_bytes <= MAX_STORED_IMAGE_BYTES:
+            return image
+
+        ratio = (MAX_STORED_IMAGE_BYTES / size_in_bytes) ** 0.5
+        target_width = max(1, int(image.width() * ratio))
+        target_height = max(1, int(image.height() * ratio))
+        return image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+    def _size_in_bytes(self, image):
+        if hasattr(image, "sizeInBytes"):
+            return image.sizeInBytes()
+        return image.bytesPerLine() * image.height()

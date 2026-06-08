@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 # Add project root to path so imports work
@@ -307,6 +308,7 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertEqual(stats["links"], 0)
         self.assertEqual(stats["texts"], 0)
         self.assertEqual(stats["paths"], 0)
+        self.assertEqual(stats["imgs"], 0)
 
     def test_get_stats(self):
         """Test stats with mixed content types."""
@@ -315,11 +317,55 @@ class TestClipboardDatabase(unittest.TestCase):
         self.db.insert("Text content")
         self.db.insert("C:\\path1")
         self.db.insert("C:\\path2\\file")
+        self.db.insert_with_type("C:\\image.png", "img")
         stats = self.db.get_stats()
-        self.assertEqual(stats["total"], 5)
+        self.assertEqual(stats["total"], 6)
         self.assertEqual(stats["links"], 2)
         self.assertEqual(stats["texts"], 1)
         self.assertEqual(stats["paths"], 2)
+        self.assertEqual(stats["imgs"], 1)
+
+    def test_locked_write_retries(self):
+        """Test locked database writes are retried."""
+        attempts = {"count": 0}
+
+        class FakeConnection:
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                pass
+
+        def operation(conn):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                import sqlite3
+                raise sqlite3.OperationalError("database is locked")
+            return "ok"
+
+        with patch.object(self.db, "_get_connection", return_value=FakeConnection()):
+            self.assertEqual(self.db._write_with_retry(operation), "ok")
+        self.assertEqual(attempts["count"], 2)
+
+    def test_invalid_storage_falls_back_to_user_db_path(self):
+        """Test invalid base_dir falls back to the user database path."""
+        fallback_root = tempfile.mkdtemp()
+        fallback_path = Path(fallback_root) / "data" / "clips.db"
+        invalid_base = Path(tempfile.mkdtemp()) / "not_a_dir"
+        invalid_base.write_text("file blocks directory creation")
+
+        def fallback_db_path():
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            return str(fallback_path)
+
+        with patch("core.database.get_user_db_path", side_effect=fallback_db_path):
+            db = ClipboardDatabase(str(invalid_base))
+
+        self.assertEqual(db.db_path, str(fallback_path))
+        self.assertTrue(fallback_path.exists())
 
     def test_purge_old_records_retention_days_parameter(self):
         """Test purge_old_records with custom retention days."""
