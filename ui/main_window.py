@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QCursor,
     QPainter,
     QPainterPath,
+    QRegion,
 )
 import ctypes
 import ctypes.wintypes
@@ -25,6 +26,7 @@ from core.favicon_service import shutdown_favicon_service
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
+from ui.animations import parse_color
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
@@ -72,13 +74,20 @@ class ShelfContainer(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         
         path = QPainterPath()
-        path.addRoundedRect(self.rect(), SHELF_BORDER_RADIUS, SHELF_BORDER_RADIUS)
+        rect = self.rect()
+        if SHELF_BORDER_WIDTH > 0:
+            margin = SHELF_BORDER_WIDTH / 2.0
+            rect_f = rect.toRectF().adjusted(margin, margin, -margin, -margin)
+        else:
+            rect_f = rect.toRectF()
+            
+        path.addRoundedRect(rect_f, SHELF_BORDER_RADIUS, SHELF_BORDER_RADIUS)
         
-        bg_color = QColor(SHELF_BACKGROUND_COLOR)
+        bg_color = parse_color(SHELF_BACKGROUND_COLOR)
         painter.fillPath(path, bg_color)
         
         if SHELF_BORDER_WIDTH > 0:
-            border_color = QColor(SHELF_BORDER_COLOR)
+            border_color = parse_color(SHELF_BORDER_COLOR)
             pen = painter.pen()
             pen.setColor(border_color)
             pen.setWidth(SHELF_BORDER_WIDTH)
@@ -87,6 +96,7 @@ class ShelfContainer(QWidget):
         
         painter.end()
         super().paintEvent(event)
+
 
 
 class MainWindow(QWidget):
@@ -141,9 +151,12 @@ class MainWindow(QWidget):
         self.hotkey_timer.timeout.connect(self.check_toggle_hotkey)
         self.hotkey_timer.start(50)
 
+        # Apply native Windows Acrylic theme
+        # from ui.styles import apply_acrylic
+
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(SHELF_MARGIN[0], SHELF_MARGIN[1], SHELF_MARGIN[2], 0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
         self.container = ShelfContainer()
@@ -181,6 +194,19 @@ class MainWindow(QWidget):
         self.chip_layout.addWidget(self.empty_label)
         self.chip_layout.addStretch()
         self.update_empty_state()
+        self.update_mask()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "container"):
+            self.update_mask()
+
+    def update_mask(self):
+        rect = self.rect()
+        path = QPainterPath()
+        path.addRoundedRect(rect, SHELF_BORDER_RADIUS, SHELF_BORDER_RADIUS)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
     @safe_slot("Failed to add clipboard chip")
     def add_clip(self, content):

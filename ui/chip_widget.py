@@ -22,6 +22,8 @@ from config import (
     CHIP_BORDER_RADIUS,
     CHIP_BORDER_WIDTH,
     CHIP_BORDER_COLOR,
+    CHIP_HOVER_BORDER_COLOR,
+    CHIP_PINNED_BORDER_COLOR,
     CHIP_DEFAULT_BACKGROUND,
     CHIP_HOVER_BACKGROUND,
     CHIP_PINNED_BACKGROUND,
@@ -152,10 +154,11 @@ class ChipWidget(QWidget):
         self.layout.addWidget(self.open_icon)
 
     def apply_style(self):
+        border_color = CHIP_PINNED_BORDER_COLOR if self.pinned else (CHIP_HOVER_BORDER_COLOR if self._is_hovered else CHIP_BORDER_COLOR)
         self.setStyleSheet(f"""
             #chip {{
                 background-color: {color_to_rgba(self._background_color)};
-                border: {CHIP_BORDER_WIDTH}px solid {CHIP_BORDER_COLOR};
+                border: {CHIP_BORDER_WIDTH}px solid {border_color};
                 border-radius: {CHIP_BORDER_RADIUS}px;
             }}
         """)
@@ -558,6 +561,7 @@ class ChipWidget(QWidget):
 
     def show_context_menu(self, position):
         menu = QMenu(self)
+        menu.setAttribute(Qt.WA_TranslucentBackground)
         pin_label = "Unpin" if self.pinned else "Pin"
         pin_action = QAction(pin_label, self)
         delete_action = QAction("Delete", self)

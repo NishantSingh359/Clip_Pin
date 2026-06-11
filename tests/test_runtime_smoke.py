@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
 from ui.chip_widget import ChipWidget
+from ui.main_window import MainWindow
 
 
 app = QApplication.instance() or QApplication([])
@@ -37,6 +38,16 @@ class FakeFaviconService:
 
 
 class TestRuntimeSmoke(unittest.TestCase):
+    def test_scroll_viewport_uses_rounded_clipping(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        self.assertIn("border-radius", window.scroll.viewport().styleSheet().lower())
+        window.deleteLater()
+
     def test_dragdrop_invalid_data_is_ignored(self):
         handler = DragDropHandler(tempfile.mkdtemp())
         mime = RaisingMimeData()
