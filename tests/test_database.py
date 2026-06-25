@@ -388,16 +388,16 @@ class TestClipboardDatabase(unittest.TestCase):
         conn = self.db._get_connection()
         try:
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, ?)",
-                ("text", "old_record_60_days", "2026-03-18 00:00:00")
+                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-60 days'))",
+                ("text", "old_record_60_days")
             )
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, ?)",
-                ("text", "old_record_45_days", "2026-04-02 00:00:00")
+                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-45 days'))",
+                ("text", "old_record_45_days")
             )
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, ?)",
-                ("text", "recent_record", "2026-05-16 00:00:00")
+                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-1 day'))",
+                ("text", "recent_record")
             )
             conn.commit()
         finally:
@@ -405,8 +405,7 @@ class TestClipboardDatabase(unittest.TestCase):
 
         self.assertEqual(self.db.count(), 3)
 
-        # Purge records older than 30 days (current date ~May 17, 2026)
-        # Should delete: old_record_60_days (Mar 18) and old_record_45_days (Apr 2)
+        # Should delete the 60-day and 45-day records, but keep the 1-day record.
         purged = self.db.purge_old_records(retention_days=30)
         self.assertEqual(purged, 2)
 

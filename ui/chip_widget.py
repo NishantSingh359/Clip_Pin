@@ -34,6 +34,10 @@ from config import (
     CHIP_MAX_WIDTH,
     CHIP_MIN_WIDTH,
     CHIP_HEIGHT,
+    clip_indexing,
+    CLIP_INDEX_FONT_SIZE,
+    CLIP_INDEX_FONT_WEIGHT,
+    CLIP_INDEX_TEXT_COLOR,
     CONTEXT_MENU_BACKGROUND_COLOR,
     CONTEXT_MENU_BORDER_WIDTH,
     CONTEXT_MENU_TEXT_COLOR,
@@ -71,6 +75,7 @@ class ChipWidget(QWidget):
         super().__init__()
 
         self.content = content
+        self.clip_index = None
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
@@ -119,6 +124,18 @@ class ChipWidget(QWidget):
         self.layout.setContentsMargins(*CHIP_PADDING)
         self.layout.setSpacing(CHIP_SPACING)
 
+        self.index_label = QLabel()
+        self.index_label.setAlignment(Qt.AlignCenter)
+        self.index_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.index_label.setStyleSheet(f"""
+            QLabel {{
+                color: {CLIP_INDEX_TEXT_COLOR};
+                font-size: {CLIP_INDEX_FONT_SIZE}px;
+                font-weight: {CLIP_INDEX_FONT_WEIGHT};
+            }}
+        """)
+        self.index_label.hide()
+
         self.icon = QLabel()
         self.icon.setFixedSize(18, 18)
         self.icon.setAlignment(Qt.AlignCenter)
@@ -149,6 +166,7 @@ class ChipWidget(QWidget):
         self.open_icon.mousePressEvent = self.open_link
         self.open_icon.setVisible(self.kind == "LINK")
 
+        self.layout.addWidget(self.index_label)
         self.layout.addWidget(self.icon)
         self.layout.addWidget(self.title)
         self.layout.addWidget(self.open_icon)
@@ -194,6 +212,12 @@ class ChipWidget(QWidget):
     def animate_press(self):
         self.animate_background_to(CHIP_PRESSED_BACKGROUND, MOTION_FAST_MS)
 
+    def set_clip_index(self, index):
+        self.clip_index = index
+        self.index_label.setText(str(index))
+        self.index_label.setVisible(bool(clip_indexing))
+        self.update_label()
+
     def detect_kind(self):
         content = self.content.strip()
 
@@ -211,16 +235,20 @@ class ChipWidget(QWidget):
     def update_label(self):
         text = self.display_text()
         metrics = QFontMetrics(self.title.font())
-        title_width = CHIP_MAX_WIDTH - 68 if self.kind == "LINK" else CHIP_MAX_WIDTH - 42
+        index_width = self.index_label.sizeHint().width() + CHIP_SPACING if self.index_label.isVisible() else 0
+        if self.kind == "LINK":
+            title_width = CHIP_MAX_WIDTH - 68 - index_width
+        elif self.kind == "IMG":
+            title_width = CHIP_MAX_WIDTH - 34 - index_width
+        else:
+            title_width = CHIP_MAX_WIDTH - 42 - index_width
+        title_width = max(36, title_width)
         self.title.setText(metrics.elidedText(text, Qt.ElideRight, title_width))
 
         if self.kind == "IMG":
             self.icon.show()
             self.set_image_thumb()
-            self.title.setText("Screenshot")
-            return
-
-        if self.kind == "LINK":
+        elif self.kind == "LINK":
             self.icon.show()
             self.icon.setText("")
             self.icon.setPixmap(self.logo_fallback_pixmap())

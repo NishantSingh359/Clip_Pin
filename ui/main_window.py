@@ -233,6 +233,7 @@ class MainWindow(QWidget):
         self.chips_by_content[content] = chip
         self.update_empty_state()
         self.insert_chip(chip)
+        self.refresh_chip_indexes()
         # Animations removed: immediately ensure chip is visible at its base width
         chip.setMinimumWidth(chip._base_width)
         chip.setMaximumWidth(chip._base_width)
@@ -261,6 +262,7 @@ class MainWindow(QWidget):
         self.chip_layout.removeWidget(chip)
         chip.deleteLater()
         self.update_empty_state()
+        self.refresh_chip_indexes()
 
     def update_empty_state(self):
         if hasattr(self, "empty_label"):
@@ -289,6 +291,7 @@ class MainWindow(QWidget):
             except Exception:
                 log_exception("Failed to delete clipboard item during clear")
             self.remove_chip_widget(chip)
+        self.refresh_chip_indexes()
 
     @safe_slot("Failed to pin clipboard chip")
     def pin_clip(self, content):
@@ -298,6 +301,7 @@ class MainWindow(QWidget):
 
         self.chip_layout.removeWidget(chip)
         self.insert_chip(chip)
+        self.refresh_chip_indexes()
 
     def insert_chip(self, chip):
         pinned_count = 0
@@ -315,6 +319,21 @@ class MainWindow(QWidget):
             else:
                 break
         self.chip_layout.insertWidget(pinned_count, chip)
+
+    def refresh_chip_indexes(self):
+        chips = []
+        for layout_index in range(self.chip_layout.count()):
+            item = self.chip_layout.itemAt(layout_index)
+            widget = item.widget() if item else None
+            if widget is None or widget is getattr(self, "empty_label", None):
+                continue
+            if hasattr(widget, "set_clip_index"):
+                chips.append(widget)
+
+        index = len(chips)
+        for chip in chips:
+            chip.set_clip_index(index)
+            index -= 1
 
     @safe_slot("Failed to paste clipboard chip")
     def paste_clip(self, content):
