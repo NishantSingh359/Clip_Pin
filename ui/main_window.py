@@ -109,6 +109,7 @@ class MainWindow(QWidget):
         self.last_target_window = None
         self.chips_by_content = {}
         self.is_shelf_pinned = False
+        self._is_hiding = False
         self._hotkey_was_down = False
         self._screen_geometry_cache_key = None
 
@@ -142,6 +143,10 @@ class MainWindow(QWidget):
         self.auto_hide_timer = QTimer(self)
         self.auto_hide_timer.setSingleShot(True)
         self.auto_hide_timer.timeout.connect(self.hide_shelf)
+
+        self.hide_reset_timer = QTimer(self)
+        self.hide_reset_timer.setSingleShot(True)
+        self.hide_reset_timer.timeout.connect(lambda: setattr(self, "_is_hiding", False))
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.check_mouse_position)
@@ -391,7 +396,7 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
-        if self.is_shelf_pinned:
+        if self.is_shelf_pinned or self._is_hiding:
             return
 
         self.update_screen_geometry("cursor")
@@ -399,7 +404,14 @@ class MainWindow(QWidget):
         mouse_y = cursor.y()
 
         if self.is_open:
-            active_area = self.geometry().adjusted(-8, -8, 8, HIDE_DISTANCE)
+            # Use the same hide margin on both the top and bottom edges so
+            # Windows dock/taskbar gaps do not leave the shelf partially visible.
+            active_area = self.geometry().adjusted(
+                -8,
+                -HIDE_DISTANCE,
+                8,
+                HIDE_DISTANCE,
+            )
             if not active_area.contains(cursor):
                 if not self.auto_hide_timer.isActive():
                     self.auto_hide_timer.start(SHELF_AUTO_HIDE_DELAY)
@@ -408,9 +420,11 @@ class MainWindow(QWidget):
                     self.auto_hide_timer.stop()
             return
 
+        edge_geometry = getattr(self, "full_screen_geometry", self.screen_geometry)
+        hover_threshold = edge_geometry.top() + max(HOVER_TRIGGER_HEIGHT, 1)
         is_over_top_edge = (
             self.trigger_left <= cursor.x() <= self.trigger_right
-            and mouse_y <= self.screen_geometry.top() + HOVER_TRIGGER_HEIGHT
+            and mouse_y <= hover_threshold
         )
         if is_over_top_edge:
             self.show_shelf("cursor")
@@ -418,7 +432,17 @@ class MainWindow(QWidget):
     def show_shelf(self, monitor_hint="cursor"):
         self.update_screen_geometry(monitor_hint)
         self.last_target_window = self.paste_controller.foreground_window()
+        self._is_hiding = False
+        if self.hide_reset_timer.isActive():
+            self.hide_reset_timer.stop()
+
         self.is_open = True
+
+        # Make sure the shelf is raised above the taskbar/dock layer on Windows
+        # before animating it into view.
+        self.show()
+        self.raise_()
+
         if SHELF_CHIP_REVEAL_ENABLED:
             self.reveal_chips()
         self.animate_to(self.open_pos)
@@ -428,6 +452,11 @@ class MainWindow(QWidget):
             return
 
         self.is_open = False
+        self._is_hiding = True
+        if self.hide_reset_timer.isActive():
+            self.hide_reset_timer.stop()
+        self.hide_reset_timer.start(max(MOTION_SHELF_MS, 120) + 40)
+
         self.animate_to(self.hidden_pos)
 
     def reveal_chips(self):
@@ -488,12 +517,17 @@ class MainWindow(QWidget):
     def update_screen_geometry(self, monitor_hint="cursor"):
         screen = self.screen_for_hint(monitor_hint)
         geometry = screen.availableGeometry()
+        full_geometry = screen.geometry()
         cache_key = (
             screen.name(),
             geometry.left(),
             geometry.top(),
             geometry.width(),
             geometry.height(),
+            full_geometry.left(),
+            full_geometry.top(),
+            full_geometry.width(),
+            full_geometry.height(),
         )
         if cache_key == self._screen_geometry_cache_key:
             return
@@ -508,8 +542,10 @@ class MainWindow(QWidget):
         x = geometry.left() + (geometry.width() - self.width()) // 2
         y = geometry.top() + SHELF_TOP_MARGIN
         self.screen_geometry = geometry
+        self.full_screen_geometry = full_geometry
         self.open_pos = QPoint(x, y)
-        self.hidden_pos = QPoint(x, y - self.height() - 10)
+        hidden_y = full_geometry.top() - self.height() - 10
+        self.hidden_pos = QPoint(x, hidden_y)
         trigger_center = geometry.left() + geometry.width() // 2
         trigger_half_width = HOVER_TRIGGER_WIDTH // 2
         self.trigger_left = trigger_center - trigger_half_width
