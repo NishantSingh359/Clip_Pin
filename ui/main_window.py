@@ -337,7 +337,9 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to paste clipboard chip")
     def paste_clip(self, content):
-        self.hide_shelf()
+        from config import HIDE_ON_PASTE
+        if HIDE_ON_PASTE:
+            self.hide_shelf()
         chip = self.chips_by_content.get(content)
         if chip and chip.kind == "IMG":
             self.clipboard_manager.set_image_for_paste(content)
