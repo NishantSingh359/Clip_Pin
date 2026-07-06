@@ -435,6 +435,8 @@ class MainWindow(QWidget):
         self.add_clips(items)
         self._set_clipboard_for_drop(items)
         event.acceptProposedAction()
+        
+        self.hide_shelf()
 
     def _set_clipboard_for_drop(self, items):
         if not items:
@@ -544,7 +546,16 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
-        if self.is_shelf_pinned or self._is_hiding or not self.show_on_hover_enabled:
+        is_dragging = False
+        if sys.platform == "win32":
+            is_dragging = bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        else:
+            is_dragging = bool(QApplication.mouseButtons() & Qt.LeftButton)
+
+        if self.is_shelf_pinned or self._is_hiding:
+            return
+            
+        if not self.show_on_hover_enabled and not is_dragging and not self.is_open:
             return
 
         self.update_screen_geometry("cursor")
