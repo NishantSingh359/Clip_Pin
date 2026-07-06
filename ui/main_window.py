@@ -61,6 +61,7 @@ from config import (
     SHELF_SHOW_ON_HOVER,
     SHELF_HEIGHT,
     SHELF_TOP_MARGIN,
+    HIDE_ON_PASTE,
     clip_indexing,
     SHELF_WIDTH_RATIO,
     SHELF_BACKGROUND_COLOR,
@@ -127,6 +128,7 @@ class MainWindow(QWidget):
         self._hotkey_was_down = False
         self._screen_geometry_cache_key = None
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
+        self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
 
         self.setWindowFlags(
@@ -358,8 +360,7 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to paste clipboard chip")
     def paste_clip(self, content):
-        from config import HIDE_ON_PASTE
-        if HIDE_ON_PASTE:
+        if self.hide_on_paste_enabled:
             self.hide_shelf()
         chip = self.chips_by_content.get(content)
         if chip and chip.kind == "IMG":
@@ -455,14 +456,20 @@ class MainWindow(QWidget):
         self.clip_indexing_enabled = bool(enabled)
         self.refresh_chip_indexes()
 
+    def set_hide_on_paste_enabled(self, enabled):
+        self.hide_on_paste_enabled = bool(enabled)
+
     def show_shelf_context_menu(self, pos):
         menu = QMenu(self)
         hover_action = QAction("Show on Hover", self, checkable=True)
         hover_action.setChecked(self.show_on_hover_enabled)
+        hide_action = QAction("Hide on Paste", self, checkable=True)
+        hide_action.setChecked(self.hide_on_paste_enabled)
         index_action = QAction("Show Clip Indexes", self, checkable=True)
         index_action.setChecked(self.clip_indexing_enabled)
 
         menu.addAction(hover_action)
+        menu.addAction(hide_action)
         menu.addAction(index_action)
 
         menu.setStyleSheet(f'''
@@ -489,6 +496,8 @@ class MainWindow(QWidget):
         )
         if selected_action is hover_action:
             self.set_show_on_hover_enabled(hover_action.isChecked())
+        elif selected_action is hide_action:
+            self.set_hide_on_paste_enabled(hide_action.isChecked())
         elif selected_action is index_action:
             self.set_clip_indexing_enabled(index_action.isChecked())
 
