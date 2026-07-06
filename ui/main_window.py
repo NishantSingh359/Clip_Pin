@@ -19,6 +19,7 @@ from PySide6.QtGui import (
 )
 import ctypes
 import ctypes.wintypes
+import json
 import sys
 from pathlib import Path
 
@@ -130,6 +131,7 @@ class MainWindow(QWidget):
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
+        self._load_context_menu_settings()
 
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -451,13 +453,52 @@ class MainWindow(QWidget):
 
     def set_show_on_hover_enabled(self, enabled):
         self.show_on_hover_enabled = bool(enabled)
+        self._save_context_menu_settings()
+
+    def set_hide_on_paste_enabled(self, enabled):
+        self.hide_on_paste_enabled = bool(enabled)
+        self._save_context_menu_settings()
 
     def set_clip_indexing_enabled(self, enabled):
         self.clip_indexing_enabled = bool(enabled)
         self.refresh_chip_indexes()
+        self._save_context_menu_settings()
 
-    def set_hide_on_paste_enabled(self, enabled):
-        self.hide_on_paste_enabled = bool(enabled)
+    def _context_menu_settings_path(self):
+        settings_path = APP_STORAGE_DIR / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        return settings_path
+
+    def _load_context_menu_settings(self):
+        settings_path = self._context_menu_settings_path()
+        if not settings_path.exists():
+            return
+
+        try:
+            with settings_path.open("r", encoding="utf-8") as settings_file:
+                settings = json.load(settings_file)
+            self.show_on_hover_enabled = bool(settings.get("show_on_hover_enabled", self.show_on_hover_enabled))
+            self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
+            self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
+            self.refresh_chip_indexes()
+        except Exception as exc:
+            log_exception(f"Failed to load context menu settings: {exc}")
+
+    def _save_context_menu_settings(self):
+        settings_path = self._context_menu_settings_path()
+        try:
+            with settings_path.open("w", encoding="utf-8") as settings_file:
+                json.dump(
+                    {
+                        "show_on_hover_enabled": self.show_on_hover_enabled,
+                        "hide_on_paste_enabled": self.hide_on_paste_enabled,
+                        "clip_indexing_enabled": self.clip_indexing_enabled,
+                    },
+                    settings_file,
+                    indent=2,
+                )
+        except Exception as exc:
+            log_exception(f"Failed to save context menu settings: {exc}")
 
     def show_shelf_context_menu(self, pos):
         menu = QMenu(self)
