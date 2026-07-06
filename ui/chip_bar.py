@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property
 from PySide6.QtGui import QPainterPath, QRegion
 from PySide6.QtWidgets import QScrollArea, QSizePolicy
 
-from config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS, SCROLL_VIEWPORT_BORDER_RADIUS, CHIP_OVERSCROLL_LIMIT, CHIP_OVERSCROLL_DRAG_MS, CHIP_OVERSCROLL_BOUNCE_MS
+from config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS, SCROLL_VIEWPORT_BORDER_RADIUS
 
 
 class ChipBar(QScrollArea):
@@ -45,25 +45,12 @@ class ChipBar(QScrollArea):
 
     @scroll_value.setter
     def scroll_value(self, value):
-        self._scroll_value = value
         scrollbar = self.horizontalScrollBar()
         min_val = scrollbar.minimum()
         max_val = scrollbar.maximum()
-        
-        if value < min_val:
-            scrollbar.setValue(min_val)
-            if self.widget():
-                self.widget().move(min_val - int(value), self.widget().y())
-        elif value > max_val:
-            scrollbar.setValue(max_val)
-            if self.widget():
-                self.widget().move(-max_val - int(value - max_val), self.widget().y())
-        else:
-            scrollbar.setValue(int(value))
-            # QScrollArea automatically positions the widget when scrollbar value changes,
-            # but since we might have overridden it during overscroll, we ensure it's correct.
-            if self.widget():
-                self.widget().move(-int(value), self.widget().y())
+        clamped_value = max(min_val, min(max_val, int(value)))
+        self._scroll_value = clamped_value
+        scrollbar.setValue(clamped_value)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -99,67 +86,28 @@ class ChipBar(QScrollArea):
         raw_target = base_value - (delta * CHIP_SCROLL_SPEED)
         self._target_scroll_value = raw_target
         
+        target = max(min_val, min(max_val, raw_target))
+        self._target_scroll_value = target
+
         if not MOTION_ENABLED:
-            target = max(min_val, min(max_val, raw_target))
             self.scroll_value = target
             event.accept()
             return
 
-        # Determine if we are overscrolling
-        if raw_target < min_val or raw_target > max_val:
-            # Allow some overscroll distance but cap it
-            if raw_target < min_val:
-                bounce_target = max(min_val - CHIP_OVERSCROLL_LIMIT, raw_target)
-                final_target = min_val
-            else:
-                bounce_target = min(max_val + CHIP_OVERSCROLL_LIMIT, raw_target)
-                final_target = max_val
-                
-            self._scroll_animation.stop()
-            
-            # Disconnect previous finished signal if it exists to avoid multiple connections
-            if hasattr(self, '_bounce_back_slot') and self._bounce_back_slot is not None:
-                try:
-                    self._scroll_animation.finished.disconnect(self._bounce_back_slot)
-                except Exception:
-                    pass
-                self._bounce_back_slot = None
-                
-            self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
-            self._scroll_animation.setDuration(CHIP_OVERSCROLL_DRAG_MS)
-            self._scroll_animation.setStartValue(self._scroll_value)
-            self._scroll_animation.setEndValue(bounce_target)
-            
-            def bounce_back():
-                if hasattr(self, '_bounce_back_slot') and self._bounce_back_slot is not None:
-                    try:
-                        self._scroll_animation.finished.disconnect(self._bounce_back_slot)
-                    except Exception:
-                        pass
-                    self._bounce_back_slot = None
-                self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
-                self._scroll_animation.setDuration(CHIP_OVERSCROLL_BOUNCE_MS)
-                self._scroll_animation.setStartValue(self.scroll_value)
-                self._scroll_animation.setEndValue(final_target)
-                self._scroll_animation.start()
-                
-            self._bounce_back_slot = bounce_back
-            self._scroll_animation.finished.connect(self._bounce_back_slot)
-            self._scroll_animation.start()
-        else:
-            if hasattr(self, '_bounce_back_slot') and self._bounce_back_slot is not None:
-                try:
-                    self._scroll_animation.finished.disconnect(self._bounce_back_slot)
-                except Exception:
-                    pass
-                self._bounce_back_slot = None
-                
-            self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
-            self._scroll_animation.setDuration(CHIP_SCROLL_DURATION_MS)
-            self._scroll_animation.stop()
-            self._scroll_animation.setStartValue(self._scroll_value)
-            self._scroll_animation.setEndValue(raw_target)
-            self._scroll_animation.start()
+        current_scroll = scrollbar.value()
+        if hasattr(self, '_bounce_back_slot') and self._bounce_back_slot is not None:
+            try:
+                self._scroll_animation.finished.disconnect(self._bounce_back_slot)
+            except Exception:
+                pass
+            self._bounce_back_slot = None
+
+        self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._scroll_animation.setDuration(CHIP_SCROLL_DURATION_MS)
+        self._scroll_animation.stop()
+        self._scroll_animation.setStartValue(current_scroll)
+        self._scroll_animation.setEndValue(target)
+        self._scroll_animation.start()
 
         event.accept()
 
