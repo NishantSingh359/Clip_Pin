@@ -656,8 +656,11 @@ class MainWindow(QWidget):
             or ctypes.windll.user32.GetAsyncKeyState(0xA2) & 0x8000
             or ctypes.windll.user32.GetAsyncKeyState(0xA3) & 0x8000
         )
-        space_pressed = ctypes.windll.user32.GetAsyncKeyState(0x20) & 0x8000
-        return bool(ctrl_pressed and space_pressed)
+        win_pressed = (
+            ctypes.windll.user32.GetAsyncKeyState(0x5B) & 0x8000
+            or ctypes.windll.user32.GetAsyncKeyState(0x5C) & 0x8000
+        )
+        return bool(ctrl_pressed and win_pressed)
 
     def animate_to(self, target):
         if self._target_pos == target:

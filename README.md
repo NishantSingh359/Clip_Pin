@@ -10,7 +10,7 @@ Copy Pin is a small clipboard history shelf for **PySide6 / Qt**. It lets you co
 - Clear all unpin chips
 - Delete chips
 - Auto-hides shelf when you move away
-- Use [CTRAL + SPACE] to pin/unpin shelf
+- Use [CTRL + WIN] to pin/unpin shelf
 - Max 100 copy limit
 
 ---
