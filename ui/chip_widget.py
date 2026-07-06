@@ -1,12 +1,14 @@
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize
+from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData
 from PySide6.QtGui import (
     QAction,
     QColor,
     QDesktopServices,
+    QDrag,
     QFont,
     QFontMetrics,
     QPainter,
@@ -16,7 +18,7 @@ from PySide6.QtGui import (
     QPolygon,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QLabel, QHBoxLayout, QMenu, QWidget, QSizePolicy
+from PySide6.QtWidgets import QApplication, QLabel, QHBoxLayout, QMenu, QWidget, QSizePolicy
 
 from config import (
     CHIP_BORDER_RADIUS,
@@ -38,11 +40,14 @@ from config import (
     CLIP_INDEX_FONT_SIZE,
     CLIP_INDEX_FONT_WEIGHT,
     CLIP_INDEX_TEXT_COLOR,
+    CONTEXT_MENU_FONT_SIZE,
+    CONTEXT_MENU_TEXT_FONT_WEIGHT,
     CONTEXT_MENU_BACKGROUND_COLOR,
     CONTEXT_MENU_BORDER_WIDTH,
     CONTEXT_MENU_TEXT_COLOR,
     CONTEXT_MENU_BORDER_COLOR,
     CONTEXT_MENU_HOVER_COLOR,
+    CONTEXT_MENU_HOVER_BORDER_RADIUS,
     CONTEXT_MENU_BORDER_RADIUS,
     CONTEXT_MENU_ITEM_PADDING,
     OPEN_ICON_PATH,
@@ -66,6 +71,7 @@ from ui.animations import (
 
 class ChipWidget(QWidget):
     paste_requested = Signal(str)
+    copy_again_requested = Signal(str)
     delete_requested = Signal(str)
     pin_requested = Signal(str)
     clear_all_requested = Signal()
@@ -83,6 +89,8 @@ class ChipWidget(QWidget):
         self._background_color = parse_color(CHIP_DEFAULT_BACKGROUND)
         self._is_hovered = False
         self._is_deleting = False
+        self._drag_start_position = None
+        self._dragging = False
         self.setObjectName("chip")
 
         self.setFixedHeight(CHIP_HEIGHT)
@@ -212,10 +220,10 @@ class ChipWidget(QWidget):
     def animate_press(self):
         self.animate_background_to(CHIP_PRESSED_BACKGROUND, MOTION_FAST_MS)
 
-    def set_clip_index(self, index):
+    def set_clip_index(self, index, show_index=True):
         self.clip_index = index
         self.index_label.setText(str(index))
-        self.index_label.setVisible(bool(clip_indexing))
+        self.index_label.setVisible(bool(show_index))
         self.update_label()
 
     def detect_kind(self):
@@ -567,12 +575,29 @@ class ChipWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.animate_press()
-            self.paste_requested.emit(self.content)
+            self._drag_start_position = event.pos()
+            self._dragging = False
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if (
+            event.buttons() & Qt.LeftButton
+            and self._drag_start_position is not None
+            and not self._dragging
+        ):
+            distance = (event.pos() - self._drag_start_position).manhattanLength()
+            if distance >= QApplication.startDragDistance():
+                self._dragging = True
+                self._start_drag()
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and not self._is_deleting:
+        if event.button() == Qt.LeftButton:
+            if not self._dragging and not self._is_deleting:
+                self.paste_requested.emit(self.content)
             self.animate_background_to(self.state_background(), MOTION_FAST_MS)
+            self._drag_start_position = None
+            self._dragging = False
         super().mouseReleaseEvent(event)
 
     def enterEvent(self, event):
@@ -592,15 +617,19 @@ class ChipWidget(QWidget):
         menu.setAttribute(Qt.WA_TranslucentBackground)
         pin_label = "Unpin" if self.pinned else "Pin"
         pin_action = QAction(pin_label, self)
+        copy_again_action = QAction("Copy Again", self)
         delete_action = QAction("Delete", self)
         clear_all_action = QAction("Clear All", self)
 
         menu.addAction(pin_action)
+        menu.addAction(copy_again_action)
         menu.addAction(delete_action)
         menu.addAction(clear_all_action)
 
         menu.setStyleSheet(f'''
             QMenu {{
+                font-size: {CONTEXT_MENU_FONT_SIZE}px;
+                font-weight: {CONTEXT_MENU_TEXT_FONT_WEIGHT};
                 background-color: {CONTEXT_MENU_BACKGROUND_COLOR};
                 color: {CONTEXT_MENU_TEXT_COLOR};
                 border: {CONTEXT_MENU_BORDER_WIDTH}px solid {CONTEXT_MENU_BORDER_COLOR};
@@ -612,6 +641,7 @@ class ChipWidget(QWidget):
             }}
             QMenu::item:selected {{
                 background-color: {CONTEXT_MENU_HOVER_COLOR};
+                border-radius: {CONTEXT_MENU_HOVER_BORDER_RADIUS}px;
             }}
         ''')
 
@@ -621,10 +651,60 @@ class ChipWidget(QWidget):
             self.pinned = not self.pinned
             self.animate_background_to(self.state_background(), MOTION_BASE_MS)
             self.pin_requested.emit(self.content)
+        elif action == copy_again_action:
+            self.copy_again_requested.emit(self.content)
         elif action == delete_action:
             self.delete_requested.emit(self.content)
         elif action == clear_all_action:
             self.clear_all_requested.emit()
+
+    def _start_drag(self):
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setText(self.content)
+        mime_data.setData("text/plain", self.content.encode("utf-8"))
+        mime_data.setData("text/plain;charset=utf-8", self.content.encode("utf-8"))
+        mime_data.setHtml(self._html_preview())
+        mime_data.setData("text/html", self._html_preview().encode("utf-8"))
+
+        if sys.platform.startswith("win"):
+            utf16 = self.content.encode("utf-16le")
+            mime_data.setData("Text", utf16)
+            mime_data.setData("UnicodeText", utf16)
+            mime_data.setData("application/x-qt-windows-mime;value=\"Text\"", utf16)
+            mime_data.setData("application/x-qt-windows-mime;value=\"UnicodeText\"", utf16)
+
+        if self.kind == "LINK":
+            mime_data.setUrls([QUrl(self.content)])
+            mime_data.setData("text/uri-list", self.content.encode("utf-8"))
+        elif self.kind == "PATH":
+            mime_data.setUrls([QUrl.fromLocalFile(self.content)])
+            mime_data.setData("text/uri-list", QUrl.fromLocalFile(self.content).toString().encode("utf-8"))
+        elif self.kind == "IMG" and Path(self.content).exists():
+            mime_data.setUrls([QUrl.fromLocalFile(self.content)])
+            mime_data.setData("text/uri-list", QUrl.fromLocalFile(self.content).toString().encode("utf-8"))
+
+        drag.setMimeData(mime_data)
+        drag.setPixmap(self.grab())
+        drag.exec(Qt.CopyAction | Qt.MoveAction)
+
+    def _html_preview(self):
+        if self.kind == "LINK":
+            return f"<a href=\"{self.content}\">{self.content}</a>"
+
+        lines = self.content.splitlines()
+        if len(lines) > 1:
+            return "<br>".join([self._escape_html(line) for line in lines])
+        return self._escape_html(self.content)
+
+    def _escape_html(self, text):
+        return (
+            text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
+        )
 
     def open_link(self, event):
         if event.button() == Qt.LeftButton and self.kind == "LINK":

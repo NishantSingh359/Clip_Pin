@@ -149,6 +149,43 @@ class TestRuntimeSmoke(unittest.TestCase):
         show_shelf.assert_not_called()
         window.deleteLater()
 
+    def test_show_on_hover_toggle_disables_hover_behavior(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.show_on_hover_enabled = False
+        window.is_open = False
+        window.is_shelf_pinned = False
+        window._is_hiding = False
+        window.screen_geometry = type("Geom", (), {"top": 0})()
+        window.trigger_left = 0
+        window.trigger_right = 100
+
+        with patch.object(window, "update_screen_geometry"), \
+             patch.object(window, "show_shelf") as show_shelf, \
+             patch("ui.main_window.QCursor.pos", return_value=QPoint(50, 0)):
+            window.check_mouse_position()
+
+        show_shelf.assert_not_called()
+        window.deleteLater()
+
+    def test_clip_indexing_toggle_updates_state(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        self.assertTrue(window.clip_indexing_enabled)
+        window.set_clip_indexing_enabled(False)
+        self.assertFalse(window.clip_indexing_enabled)
+        window.set_clip_indexing_enabled(True)
+        self.assertTrue(window.clip_indexing_enabled)
+        window.deleteLater()
+
     def test_show_shelf_brings_window_to_front(self):
         with patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \

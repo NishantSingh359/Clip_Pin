@@ -5,10 +5,12 @@ from PySide6.QtWidgets import (
     QApplication,
     QSizePolicy,
     QLabel,
+    QMenu,
 )
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import (
+    QAction,
     QColor,
     QCursor,
     QPainter,
@@ -30,6 +32,16 @@ from ui.animations import parse_color
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
+    CONTEXT_MENU_FONT_SIZE,
+    CONTEXT_MENU_BACKGROUND_COLOR,
+    CONTEXT_MENU_BORDER_COLOR,
+    CONTEXT_MENU_BORDER_RADIUS,
+    CONTEXT_MENU_HOVER_BORDER_RADIUS,
+    CONTEXT_MENU_HOVER_COLOR,
+    CONTEXT_MENU_ITEM_PADDING,
+    CONTEXT_MENU_TEXT_COLOR,
+    CONTEXT_MENU_TEXT_FONT_WEIGHT,
+    CONTEXT_MENU_BORDER_WIDTH,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
     EMPTY_STATE_PADDING,
@@ -46,8 +58,10 @@ from config import (
     SHELF_CHIP_REVEAL_MS,
     SHELF_CHIP_REVEAL_STAGGER_MS,
     SHELF_CHIP_REVEAL_OFFSET,
+    SHELF_SHOW_ON_HOVER,
     SHELF_HEIGHT,
     SHELF_TOP_MARGIN,
+    clip_indexing,
     SHELF_WIDTH_RATIO,
     SHELF_BACKGROUND_COLOR,
     SHELF_BORDER_COLOR,
@@ -112,6 +126,8 @@ class MainWindow(QWidget):
         self._is_hiding = False
         self._hotkey_was_down = False
         self._screen_geometry_cache_key = None
+        self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
+        self.clip_indexing_enabled = clip_indexing
 
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -167,6 +183,10 @@ class MainWindow(QWidget):
         self.container = ShelfContainer()
         # Background is drawn in ShelfContainer.paintEvent(), so keep widget background unset
         self.container.setStyleSheet("")
+        self.container.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.container.customContextMenuRequested.connect(self.show_shelf_context_menu)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_shelf_context_menu)
 
         container_layout = QVBoxLayout(self.container)
         container_layout.setContentsMargins(*SHELF_PADDING)
@@ -227,6 +247,7 @@ class MainWindow(QWidget):
 
         chip = ChipWidget(content)
         chip.paste_requested.connect(self.paste_clip)
+        chip.copy_again_requested.connect(self.copy_again_clip)
         chip.delete_requested.connect(self.remove_clip)
         chip.pin_requested.connect(self.pin_clip)
         chip.clear_all_requested.connect(self.clear_unpinned_clips)
@@ -332,7 +353,7 @@ class MainWindow(QWidget):
 
         index = len(chips)
         for chip in chips:
-            chip.set_clip_index(index)
+            chip.set_clip_index(index, show_index=self.clip_indexing_enabled)
             index -= 1
 
     @safe_slot("Failed to paste clipboard chip")
@@ -342,14 +363,26 @@ class MainWindow(QWidget):
             self.hide_shelf()
         chip = self.chips_by_content.get(content)
         if chip and chip.kind == "IMG":
-            self.clipboard_manager.set_image_for_paste(content)
+            self.clipboard_manager.set_image_for_paste(content, temporary=True)
         else:
-            self.clipboard_manager.set_text_for_paste(content)
+            self.clipboard_manager.set_text_for_paste(content, temporary=True)
 
         QTimer.singleShot(
             MOTION_SHELF_MS,
             lambda: self.paste_controller.paste_text(content, self.last_target_window)
         )
+        QTimer.singleShot(
+            MOTION_SHELF_MS + 220,
+            self.clipboard_manager.restore_previous_clipboard
+        )
+
+    @safe_slot("Failed to copy chip content again")
+    def copy_again_clip(self, content):
+        chip = self.chips_by_content.get(content)
+        if chip and chip.kind == "IMG":
+            self.clipboard_manager.set_image_for_paste(content, temporary=False)
+        else:
+            self.clipboard_manager.set_text_for_paste(content, temporary=False)
 
     @safe_slot("Failed to trim chips")
     def trim_chips(self):
@@ -415,9 +448,53 @@ class MainWindow(QWidget):
     # HOVER DETECTION
     # -------------------------
 
+    def set_show_on_hover_enabled(self, enabled):
+        self.show_on_hover_enabled = bool(enabled)
+
+    def set_clip_indexing_enabled(self, enabled):
+        self.clip_indexing_enabled = bool(enabled)
+        self.refresh_chip_indexes()
+
+    def show_shelf_context_menu(self, pos):
+        menu = QMenu(self)
+        hover_action = QAction("Show on Hover", self, checkable=True)
+        hover_action.setChecked(self.show_on_hover_enabled)
+        index_action = QAction("Show Clip Indexes", self, checkable=True)
+        index_action.setChecked(self.clip_indexing_enabled)
+
+        menu.addAction(hover_action)
+        menu.addAction(index_action)
+
+        menu.setStyleSheet(f'''
+            QMenu {{
+                font-size: {CONTEXT_MENU_FONT_SIZE}px;
+                font-weight: {CONTEXT_MENU_TEXT_FONT_WEIGHT};
+                background-color: {CONTEXT_MENU_BACKGROUND_COLOR};
+                color: {CONTEXT_MENU_TEXT_COLOR};
+                border: {CONTEXT_MENU_BORDER_WIDTH}px solid {CONTEXT_MENU_BORDER_COLOR};
+                border-radius: {CONTEXT_MENU_BORDER_RADIUS}px;
+                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
+            }}
+            QMenu::item {{
+                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
+            }}
+            QMenu::item:selected {{
+                background-color: {CONTEXT_MENU_HOVER_COLOR};
+                border-radius: {CONTEXT_MENU_HOVER_BORDER_RADIUS}px;
+            }}
+        ''')
+
+        selected_action = menu.exec(
+            self.mapToGlobal(pos)
+        )
+        if selected_action is hover_action:
+            self.set_show_on_hover_enabled(hover_action.isChecked())
+        elif selected_action is index_action:
+            self.set_clip_indexing_enabled(index_action.isChecked())
+
     @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
-        if self.is_shelf_pinned or self._is_hiding:
+        if self.is_shelf_pinned or self._is_hiding or not self.show_on_hover_enabled:
             return
 
         self.update_screen_geometry("cursor")

@@ -24,6 +24,8 @@ class ClipboardManager(QObject):
         self._last_image_cache_key = None
         self._last_image_hash = None
         self._ignore_next = False
+        self._pending_restore = False
+        self._restore_text = None
         self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
         self._image_lock = Lock()
         self.clipboard.dataChanged.connect(self.on_data_changed)
@@ -32,12 +34,15 @@ class ClipboardManager(QObject):
         """Return the database instance for external queries."""
         return self.db
 
-    def set_text_for_paste(self, text):
+    def set_text_for_paste(self, text, temporary=False):
         self._ignore_next = True
         self._last_text = text
+        self._restore_text = self._get_current_clipboard_text()
         self.clipboard.setText(text, QClipboard.Clipboard)
+        if temporary:
+            self._pending_restore = True
 
-    def set_image_for_paste(self, image_path):
+    def set_image_for_paste(self, image_path, temporary=False):
         try:
             image = QImage(image_path)
             if image.isNull():
@@ -45,11 +50,27 @@ class ClipboardManager(QObject):
 
             self._ignore_next = True
             self._last_image_cache_key = image.cacheKey()
+            self._restore_text = self._get_current_clipboard_text()
             self.clipboard.setImage(image, QClipboard.Clipboard)
+            if temporary:
+                self._pending_restore = True
             return True
         except Exception:
             log_exception("Failed to set image for paste")
             return False
+
+    def restore_previous_clipboard(self):
+        if not getattr(self, "_pending_restore", False):
+            return
+
+        self._pending_restore = False
+        self._ignore_next = True
+        previous_text = getattr(self, "_restore_text", None)
+        if previous_text is not None:
+            self.clipboard.setText(previous_text, QClipboard.Clipboard)
+            return
+
+        self.clipboard.clear(QClipboard.Clipboard)
 
     @safe_slot("Failed to process clipboard change")
     def on_data_changed(self):
@@ -114,6 +135,12 @@ class ClipboardManager(QObject):
             return None
         data = bytes(buffer.data())
         return sha256(data).hexdigest()
+
+    def _get_current_clipboard_text(self):
+        mime = self.clipboard.mimeData()
+        if mime and mime.hasText():
+            return mime.text()
+        return None
 
     def close(self):
         self._image_executor.shutdown(wait=False, cancel_futures=True)

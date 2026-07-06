@@ -1,8 +1,11 @@
 import unittest
+from tempfile import TemporaryDirectory
 
+from PySide6.QtGui import QClipboard
 from PySide6.QtWidgets import QApplication
 
 from config import CLIP_INDEX_FONT_SIZE, CLIP_INDEX_TEXT_COLOR
+from core.clipboard_manager import ClipboardManager
 from ui.chip_widget import ChipWidget
 
 
@@ -14,6 +17,18 @@ class TestChipWidget(unittest.TestCase):
         chip = ChipWidget("hello world")
         self.assertEqual(chip.display_text(), "hello world")
         chip.deleteLater()
+
+    def test_transient_paste_restores_previous_clipboard_content(self):
+        with TemporaryDirectory() as temp_dir:
+            manager = ClipboardManager(temp_dir)
+            manager.clipboard.setText("original", QClipboard.Clipboard)
+
+            manager.set_text_for_paste("chip content", temporary=True)
+            self.assertEqual(manager.clipboard.text(QClipboard.Clipboard), "chip content")
+
+            manager.restore_previous_clipboard()
+            self.assertEqual(manager.clipboard.text(QClipboard.Clipboard), "original")
+            manager.close()
 
     def test_displays_clip_index_when_set(self):
         chip = ChipWidget("hello world")
