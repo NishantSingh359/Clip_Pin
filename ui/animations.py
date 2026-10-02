@@ -152,3 +152,27 @@ def fade_and_collapse(widget, width, duration=140, finished=None):
         group.finished.connect(finished)
     remember_animation(widget, group)
     group.start()
+
+
+def animate_widget_positions(widgets, start_positions, duration):
+    if not MOTION_ENABLED or duration <= 0:
+        return []
+
+    animations = []
+    for widget in widgets:
+        start = start_positions.get(widget)
+        end = widget.pos()
+        if start is None or start == end:
+            continue
+
+        animation = QPropertyAnimation(widget, b"pos", widget)
+        animation.setDuration(duration)
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        remember_animation(widget, animation)
+        widget.move(start)
+        animation.start()
+        animations.append(animation)
+
+    return animations

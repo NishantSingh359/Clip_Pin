@@ -213,6 +213,54 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertIn("border-radius", window.scroll.viewport().styleSheet().lower())
         window.deleteLater()
 
+    def test_pin_reorders_chip_without_collapsing_it(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        first = ChipWidget("first item")
+        second = ChipWidget("second item")
+        window.chips_by_content[first.content] = first
+        window.chips_by_content[second.content] = second
+        window.insert_chip(first)
+        window.insert_chip(second)
+        first.show()
+        second.show()
+
+        second.pinned = True
+        window.pin_clip(second.content)
+
+        self.assertIs(window.chip_layout.itemAt(0).widget(), second)
+        self.assertGreater(second.width(), 0)
+        window.deleteLater()
+
+    def test_removing_chip_shifts_next_chip_without_width_collapse(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        first = ChipWidget("first item")
+        second = ChipWidget("second item")
+        window.chips_by_content[first.content] = first
+        window.chips_by_content[second.content] = second
+        window.insert_chip(first)
+        window.insert_chip(second)
+        first.show()
+        second.show()
+        first_width = first.width()
+        second_width = second.width()
+
+        window.remove_chip_widget(first)
+
+        self.assertIs(window.chip_layout.itemAt(0).widget(), second)
+        self.assertEqual(first.width(), first_width)
+        self.assertEqual(second.width(), second_width)
+        window.deleteLater()
+
     def test_dragdrop_invalid_data_is_ignored(self):
         handler = DragDropHandler(tempfile.mkdtemp())
         mime = RaisingMimeData()

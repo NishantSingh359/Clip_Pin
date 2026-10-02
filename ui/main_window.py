@@ -30,7 +30,7 @@ from core.favicon_service import shutdown_favicon_service
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
-from ui.animations import parse_color
+from ui.animations import animate_widget_positions, expand_and_fade_in, fade, parse_color
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
@@ -56,6 +56,7 @@ from config import (
     MOUSE_POLL_MS,
     MOTION_ENABLED,
     MOTION_SHELF_MS,
+    CHIP_LAYOUT_ANIMATION_MS,
     SHELF_CHIP_REVEAL_ENABLED,
     SHELF_CHIP_REVEAL_MS,
     SHELF_CHIP_REVEAL_STAGGER_MS,
@@ -275,10 +276,7 @@ class MainWindow(QWidget):
         self.update_empty_state()
         self.insert_chip(chip)
         self.refresh_chip_indexes()
-        # Animations removed: immediately ensure chip is visible at its base width
-        chip.setMinimumWidth(chip._base_width)
-        chip.setMaximumWidth(chip._base_width)
-        chip.show()
+        expand_and_fade_in(chip, chip._base_width, CHIP_LAYOUT_ANIMATION_MS)
         self.trim_chips()
 
     def add_clips(self, contents):
@@ -298,12 +296,30 @@ class MainWindow(QWidget):
         self.remove_chip_widget(chip)
 
     def remove_chip_widget(self, chip):
-        # Remove from layout and schedule deletion (prevents stale widgets in UI)
-        # Animations removed: remove immediately
+        if getattr(chip, "_is_deleting", False):
+            return
+        chip._is_deleting = True
+        start_positions = {
+            other: other.pos()
+            for other in self.chip_widgets()
+            if other is not chip
+        }
         self.chip_layout.removeWidget(chip)
-        chip.deleteLater()
         self.update_empty_state()
         self.refresh_chip_indexes()
+
+        def finish_removal():
+            chip.deleteLater()
+
+        fade(chip, 1.0, 0.0, CHIP_LAYOUT_ANIMATION_MS, finished=finish_removal)
+        QTimer.singleShot(
+            0,
+            lambda: animate_widget_positions(
+                self.chip_widgets(),
+                start_positions,
+                CHIP_LAYOUT_ANIMATION_MS,
+            ),
+        )
 
     def update_empty_state(self):
         if hasattr(self, "empty_label"):
@@ -324,25 +340,42 @@ class MainWindow(QWidget):
             if not chip.pinned and not getattr(chip, "_is_deleting", False)
         ]
 
-        db = self.clipboard_manager.get_db()
         for chip in chips:
             self.chips_by_content.pop(chip.content, None)
             try:
-                db.delete_by_content(chip.content)
+                self.clipboard_manager.get_db().delete_by_content(chip.content)
             except Exception:
                 log_exception("Failed to delete clipboard item during clear")
             self.remove_chip_widget(chip)
-        self.refresh_chip_indexes()
 
     @safe_slot("Failed to pin clipboard chip")
     def pin_clip(self, content):
         chip = self.chips_by_content.get(content)
-        if not chip:
+        if not chip or getattr(chip, "_is_reordering", False) or getattr(chip, "_is_deleting", False):
             return
 
+        chip._is_reordering = True
+        chips = self.chip_widgets()
+        start_positions = {item: item.pos() for item in chips}
         self.chip_layout.removeWidget(chip)
         self.insert_chip(chip)
         self.refresh_chip_indexes()
+
+        def animate_reorder():
+            current_chips = self.chip_widgets()
+            animate_widget_positions(current_chips, start_positions, CHIP_LAYOUT_ANIMATION_MS)
+            QTimer.singleShot(CHIP_LAYOUT_ANIMATION_MS, lambda: setattr(chip, "_is_reordering", False))
+
+        QTimer.singleShot(0, animate_reorder)
+
+    def chip_widgets(self):
+        chips = []
+        for index in range(self.chip_layout.count()):
+            item = self.chip_layout.itemAt(index)
+            widget = item.widget() if item else None
+            if isinstance(widget, ChipWidget):
+                chips.append(widget)
+        return chips
 
     def insert_chip(self, chip):
         pinned_count = 0
