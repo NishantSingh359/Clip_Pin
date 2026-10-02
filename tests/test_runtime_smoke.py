@@ -261,6 +261,25 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertEqual(second.width(), second_width)
         window.deleteLater()
 
+    def test_internal_chip_drop_is_ignored_by_shelf(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        mime = ChipWidget("https://example.com").create_drag_mime_data()
+        event = type("DropEvent", (), {
+            "mimeData": lambda self: mime,
+            "ignore": lambda self: setattr(self, "ignored", True),
+        })()
+        window.dragdrop_handler.extract_items = lambda *_: self.fail("internal drop must not be imported")
+
+        window.dropEvent(event)
+
+        self.assertTrue(event.ignored)
+        window.deleteLater()
+
     def test_dragdrop_invalid_data_is_ignored(self):
         handler = DragDropHandler(tempfile.mkdtemp())
         mime = RaisingMimeData()

@@ -96,19 +96,20 @@ class FaviconService:
 
     def favicon_candidates(self, url, domain):
         quoted_url = quote(url, safe="")
+        page_icons = self.discover_page_icons(url)
+        origin = f"{urlparse(url).scheme or 'https'}://{urlparse(url).netloc}/"
+        if not page_icons:
+            page_icons = self.discover_page_icons(origin)
+
         candidates = [
+            *page_icons,
+            urljoin(origin, "favicon.ico"),
+            f"https://{domain}/favicon.ico",
+            f"https://icons.duckduckgo.com/ip3/{domain}.ico",
             f"https://www.google.com/s2/favicons?domain_url={quoted_url}&sz=64",
             f"https://www.google.com/s2/favicons?domain={domain}&sz=64",
-            f"https://icons.duckduckgo.com/ip3/{domain}.ico",
-            f"https://{domain}/favicon.ico",
-            f"http://{domain}/favicon.ico",
         ]
-
-        page_icons = self.discover_page_icons(f"https://{domain}")
-        if not page_icons:
-            page_icons = self.discover_page_icons(f"http://{domain}")
-
-        return page_icons + candidates
+        return list(dict.fromkeys(candidates))
 
     def discover_page_icons(self, page_url):
         try:
@@ -155,7 +156,7 @@ class FaviconService:
         return None
 
     def _cache_path(self, domain):
-        digest = hashlib.sha256(domain.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"v2:{domain}".encode("utf-8")).hexdigest()
         return self.cache_dir / f"{digest}.ico"
 
     def shutdown(self):

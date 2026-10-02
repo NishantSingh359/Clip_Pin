@@ -462,6 +462,9 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to process drag enter")
     def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-copypin-chip"):
+            event.ignore()
+            return
         if self.dragdrop_handler.can_accept(event.mimeData()):
             event.acceptProposedAction()
         else:
@@ -469,6 +472,9 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to process drag move")
     def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-copypin-chip"):
+            event.ignore()
+            return
         if self.dragdrop_handler.can_accept(event.mimeData()):
             event.acceptProposedAction()
         else:
@@ -476,6 +482,9 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to process drop")
     def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-copypin-chip"):
+            event.ignore()
+            return
         items = self.dragdrop_handler.extract_items(event.mimeData())
         if not items:
             event.ignore()

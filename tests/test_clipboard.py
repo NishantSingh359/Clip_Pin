@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QUrl
 from PySide6.QtGui import QClipboard, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -20,6 +20,22 @@ class TestChipWidget(unittest.TestCase):
         chip = ChipWidget("hello world")
         self.assertEqual(chip.display_text(), "hello world")
         self.assertIn(f"font-size: {CHIP_TEXT_FONT_SIZE}px", chip.title.styleSheet())
+        chip.deleteLater()
+
+    def test_loaded_favicon_survives_chip_index_refresh(self):
+        chip = ChipWidget("https://example.com")
+        favicon = QImage(24, 24, QImage.Format_ARGB32)
+        favicon.fill(0xff3366cc)
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        favicon.save(buffer, "PNG")
+        chip.on_favicon_data_loaded(bytes(buffer.data()))
+        loaded_pixmap = chip.icon.pixmap().toImage()
+
+        chip.set_clip_index(2)
+
+        self.assertEqual(chip.icon.pixmap().toImage(), loaded_pixmap)
+        self.assertEqual((chip.icon.pixmap().width(), chip.icon.pixmap().height()), (22, 22))
         chip.deleteLater()
 
     def test_transient_paste_restores_previous_clipboard_content(self):
@@ -130,6 +146,7 @@ class TestChipWidget(unittest.TestCase):
 
             self.assertTrue(mime_data.hasImage())
             self.assertIn("image/png", mime_data.formats())
+            self.assertTrue(mime_data.hasFormat("application/x-copypin-chip"))
             self.assertIn("<img", mime_data.html())
             self.assertFalse(mime_data.hasUrls())
             self.assertNotEqual(mime_data.text(), str(image_path))

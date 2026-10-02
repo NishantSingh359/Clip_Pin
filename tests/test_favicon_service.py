@@ -68,6 +68,29 @@ class TestFaviconService(unittest.TestCase):
 
         self.assertEqual(icons, ["https://example.com/favicon.png"])
 
+    def test_favicon_candidates_prioritize_copied_page_icon(self):
+        service = FaviconService(tempfile.mkdtemp())
+        service.executor.shutdown(wait=False)
+        page_icon = "https://example.com/assets/site-logo.png"
+
+        with patch.object(service, "discover_page_icons", return_value=[page_icon]) as discover:
+            candidates = service.favicon_candidates("https://example.com/article/1", "example.com")
+
+        self.assertEqual(candidates[0], page_icon)
+        self.assertIn("https://example.com/favicon.ico", candidates)
+        self.assertGreater(candidates.index("https://example.com/favicon.ico"), 0)
+        discover.assert_called_once_with("https://example.com/article/1")
+
+    def test_favicon_cache_path_uses_v2_namespace(self):
+        service = FaviconService(tempfile.mkdtemp())
+        service.executor.shutdown(wait=False)
+
+        self.assertTrue(service._cache_path("example.com").parent.exists())
+        self.assertNotEqual(
+            service._cache_path("example.com").name,
+            __import__("hashlib").sha256(b"example.com").hexdigest() + ".ico",
+        )
+
     def test_download_accepts_small_image_favicon(self):
         service = FaviconService(tempfile.mkdtemp())
         service.executor.shutdown(wait=False)

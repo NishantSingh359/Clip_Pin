@@ -98,6 +98,7 @@ class ChipWidget(QWidget):
         self._is_deleting = False
         self._drag_start_position = None
         self._dragging = False
+        self._favicon_pixmap = QPixmap()
         self.setObjectName("chip")
 
         self.setFixedHeight(CHIP_HEIGHT)
@@ -275,7 +276,10 @@ class ChipWidget(QWidget):
         elif self.kind == "LINK":
             self.icon.show()
             self.icon.setText("")
-            self.icon.setPixmap(self.logo_fallback_pixmap())
+            if self._favicon_pixmap.isNull():
+                self.icon.setPixmap(self.logo_fallback_pixmap())
+            else:
+                self.icon.setPixmap(self._favicon_pixmap)
         elif self.kind == "PATH":
             self.icon.show()
             self.icon.setFixedSize(FOLDER_ICON_SIZE, FOLDER_ICON_SIZE)
@@ -463,10 +467,15 @@ class ChipWidget(QWidget):
 
         pixmap = QPixmap()
         if pixmap.loadFromData(data) and not pixmap.isNull():
-            self.icon.setText("")
-            self.icon.setPixmap(
-                pixmap.scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self._favicon_pixmap = pixmap.scaled(
+                22,
+                22,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
             )
+            self.icon.setText("")
+            self.icon.setFixedSize(22, 22)
+            self.icon.setPixmap(self._favicon_pixmap)
 
     def external_link_icon(self, color):
         size = OPEN_ICON_SIZE if 'OPEN_ICON_SIZE' in globals() else 20
@@ -691,6 +700,7 @@ class ChipWidget(QWidget):
 
     def create_drag_mime_data(self, include_file_url=False):
         mime_data = QMimeData()
+        mime_data.setData("application/x-copypin-chip", b"1")
         if self.kind == "IMG":
             image = QImage(self.content)
             if not image.isNull():
