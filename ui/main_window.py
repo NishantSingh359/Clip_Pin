@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QLabel,
     QMenu,
+    QGraphicsDropShadowEffect,
 )
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
@@ -69,6 +70,9 @@ from config import (
     SHELF_BORDER_COLOR,
     SHELF_BORDER_WIDTH,
     SHELF_BORDER_RADIUS,
+    SHELF_SHADOW_BLUR_RADIUS,
+    SHELF_SHADOW_OFFSET,
+    SHELF_SHADOW_COLOR,
     SHELF_MARGIN,
     SHELF_PADDING,
     SHELF_SPACING,
@@ -83,7 +87,13 @@ class ShelfContainer(QWidget):
         super().__init__()
         self.setObjectName("shelfContainer")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setMaximumHeight(SHELF_HEIGHT)
+        self.setFixedHeight(SHELF_HEIGHT)
+        if SHELF_SHADOW_BLUR_RADIUS > 0:
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(SHELF_SHADOW_BLUR_RADIUS)
+            shadow.setOffset(*SHELF_SHADOW_OFFSET)
+            shadow.setColor(parse_color(SHELF_SHADOW_COLOR))
+            self.setGraphicsEffect(shadow)
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -131,6 +141,10 @@ class MainWindow(QWidget):
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
+        self._shadow_margin = max(
+            0,
+            int(SHELF_SHADOW_BLUR_RADIUS * 2 + max(abs(value) for value in SHELF_SHADOW_OFFSET)),
+        )
         self._load_context_menu_settings()
 
         self.setWindowFlags(
@@ -181,7 +195,12 @@ class MainWindow(QWidget):
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+        )
         main_layout.setSpacing(0)
 
         self.container = ShelfContainer()
@@ -231,11 +250,7 @@ class MainWindow(QWidget):
             self.update_mask()
 
     def update_mask(self):
-        rect = self.rect()
-        path = QPainterPath()
-        path.addRoundedRect(rect, SHELF_BORDER_RADIUS, SHELF_BORDER_RADIUS)
-        region = QRegion(path.toFillPolygon().toPolygon())
-        self.setMask(region)
+        self.clearMask()
 
     @safe_slot("Failed to add clipboard chip")
     def add_clip(self, content):
@@ -698,11 +713,13 @@ class MainWindow(QWidget):
         width = max(720, int(geometry.width() * SHELF_WIDTH_RATIO))
         width = min(width, geometry.width() - 32)
 
-        if self.width() != width or self.height() != SHELF_HEIGHT:
-            self.resize(width, SHELF_HEIGHT)
+        window_width = width + self._shadow_margin * 2
+        window_height = SHELF_HEIGHT + self._shadow_margin * 2
+        if self.width() != window_width or self.height() != window_height:
+            self.resize(window_width, window_height)
 
-        x = geometry.left() + (geometry.width() - self.width()) // 2
-        y = geometry.top() + SHELF_TOP_MARGIN
+        x = geometry.left() + (geometry.width() - width) // 2 - self._shadow_margin
+        y = geometry.top() + SHELF_TOP_MARGIN - self._shadow_margin
         self.screen_geometry = geometry
         self.full_screen_geometry = full_geometry
         self.open_pos = QPoint(x, y)
