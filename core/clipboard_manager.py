@@ -23,9 +23,11 @@ class ClipboardManager(QObject):
         self._last_text = ""
         self._last_image_cache_key = None
         self._last_image_hash = None
-        self._ignore_next = False
+        self._pending_image_hashes = set()
+        self._ignore_next_count = 0
         self._pending_restore = False
         self._restore_text = None
+        self._restore_image = None
         self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
         self._image_lock = Lock()
         self.clipboard.dataChanged.connect(self.on_data_changed)
@@ -35,9 +37,10 @@ class ClipboardManager(QObject):
         return self.db
 
     def set_text_for_paste(self, text, temporary=False):
-        self._ignore_next = True
+        self._ignore_next_count += 1
         self._last_text = text
         self._restore_text = self._get_current_clipboard_text()
+        self._restore_image = self._get_current_clipboard_image()
         self.clipboard.setText(text, QClipboard.Clipboard)
         if temporary:
             self._pending_restore = True
@@ -48,9 +51,11 @@ class ClipboardManager(QObject):
             if image.isNull():
                 return False
 
-            self._ignore_next = True
+            self._ignore_next_count += 1
             self._last_image_cache_key = image.cacheKey()
+            self._last_image_hash = self._hash_image(image)
             self._restore_text = self._get_current_clipboard_text()
+            self._restore_image = self._get_current_clipboard_image()
             self.clipboard.setImage(image, QClipboard.Clipboard)
             if temporary:
                 self._pending_restore = True
@@ -64,18 +69,28 @@ class ClipboardManager(QObject):
             return
 
         self._pending_restore = False
-        self._ignore_next = True
+        self._ignore_next_count += 1
         previous_text = getattr(self, "_restore_text", None)
+        previous_image = getattr(self, "_restore_image", None)
+        if previous_image is not None:
+            self._last_image_cache_key = previous_image.cacheKey()
+            self._last_image_hash = self._hash_image(previous_image)
+            self.clipboard.setImage(previous_image, QClipboard.Clipboard)
+            return
         if previous_text is not None:
+            self._last_text = previous_text
             self.clipboard.setText(previous_text, QClipboard.Clipboard)
             return
 
+        self._last_text = ""
+        self._last_image_cache_key = None
+        self._last_image_hash = None
         self.clipboard.clear(QClipboard.Clipboard)
 
     @safe_slot("Failed to process clipboard change")
     def on_data_changed(self):
-        if self._ignore_next:
-            self._ignore_next = False
+        if getattr(self, "_ignore_next_count", 0) > 0:
+            self._ignore_next_count -= 1
             return
 
         mime = self.clipboard.mimeData()
@@ -88,8 +103,17 @@ class ClipboardManager(QObject):
             if cache_key == self._last_image_cache_key:
                 return
 
+            image_hash = self._hash_image(image)
+            if not image_hash:
+                return
+
+            with self._image_lock:
+                if image_hash == self._last_image_hash or image_hash in self._pending_image_hashes:
+                    return
+                self._pending_image_hashes.add(image_hash)
+
             self._last_image_cache_key = cache_key
-            self._image_executor.submit(self._process_image, image.copy())
+            self._image_executor.submit(self._process_image, image.copy(), image_hash, True)
             return
 
 
@@ -107,15 +131,19 @@ class ClipboardManager(QObject):
         except Exception:
             log_exception("Failed to store text clipboard item")
 
-    def _process_image(self, image):
+    def _process_image(self, image, image_hash=None, reserved=False):
         try:
-            image_hash = self._hash_image(image)
+            image_hash = image_hash or self._hash_image(image)
             if not image_hash:
                 return
 
             with self._image_lock:
                 if image_hash == self._last_image_hash:
+                    self._pending_image_hashes.discard(image_hash)
                     return
+                if not reserved and image_hash in self._pending_image_hashes:
+                    return
+                self._pending_image_hashes.add(image_hash)
 
             image_path = self.image_store.save_image(image, "screenshot")
             if not image_path:
@@ -127,6 +155,10 @@ class ClipboardManager(QObject):
             self.image_copied.emit(image_path)
         except Exception:
             log_exception("Failed to process clipboard image")
+        finally:
+            if image_hash:
+                with self._image_lock:
+                    self._pending_image_hashes.discard(image_hash)
 
     def _hash_image(self, image):
         buffer = QBuffer()
@@ -140,6 +172,14 @@ class ClipboardManager(QObject):
         mime = self.clipboard.mimeData()
         if mime and mime.hasText():
             return mime.text()
+        return None
+
+    def _get_current_clipboard_image(self):
+        mime = self.clipboard.mimeData()
+        if mime and mime.hasImage():
+            image = self.clipboard.image()
+            if not image.isNull():
+                return image
         return None
 
     def close(self):

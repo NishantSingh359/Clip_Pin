@@ -15,6 +15,17 @@ app = QApplication.instance() or QApplication([])
 
 
 class TestImageStore(unittest.TestCase):
+    def test_screenshots_use_sequential_names(self):
+        store = ImageStore(tempfile.mkdtemp())
+        image = QImage(24, 24, QImage.Format_ARGB32)
+        image.fill(QColor("red"))
+
+        first = Path(store.save_image(image, "screenshot"))
+        second = Path(store.save_image(image, "screenshot"))
+
+        self.assertEqual(first.name, "screenshot-1.png")
+        self.assertEqual(second.name, "screenshot-2.png")
+
     def test_large_image_is_bounded_when_saved(self):
         temp_dir = tempfile.mkdtemp()
         store = ImageStore(temp_dir)
@@ -55,6 +66,28 @@ class TestImageStore(unittest.TestCase):
 
         self.assertEqual(len(saved_paths), 1)
         self.assertEqual(len(emitted), 1)
+
+    def test_clipboard_image_is_processed_after_hash_reservation(self):
+        temp_dir = tempfile.mkdtemp()
+        manager = ClipboardManager(temp_dir)
+        manager.clipboard.dataChanged.disconnect(manager.on_data_changed)
+        saved = []
+        emitted = []
+        image_path = str(Path(temp_dir) / "screenshot.png")
+        image = QImage(24, 24, QImage.Format_ARGB32)
+        image.fill(QColor("blue"))
+        manager.image_store.save_image = lambda *_: image_path
+        manager.db.insert_with_type = lambda content, clip_type: saved.append((content, clip_type))
+        manager.image_copied.connect(emitted.append)
+        manager.clipboard.setImage(image)
+
+        manager.on_data_changed()
+        manager._image_executor.shutdown(wait=True)
+        app.processEvents()
+        manager.close()
+
+        self.assertEqual(saved, [(image_path, "img")])
+        self.assertEqual(emitted, [image_path])
 
 
 if __name__ == "__main__":

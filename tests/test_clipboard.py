@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PySide6.QtGui import QClipboard
@@ -30,6 +31,26 @@ class TestChipWidget(unittest.TestCase):
             self.assertEqual(manager.clipboard.text(QClipboard.Clipboard), "original")
             manager.close()
 
+    def test_transient_image_paste_restores_previous_clipboard_text(self):
+        with TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "test.png"
+            from PySide6.QtGui import QImage
+
+            image = QImage(32, 32, QImage.Format_RGB32)
+            image.fill(0xff0000)
+            image.save(str(image_path), "PNG")
+
+            manager = ClipboardManager(temp_dir)
+            manager.clipboard.setText("original", QClipboard.Clipboard)
+
+            result = manager.set_image_for_paste(str(image_path), temporary=True)
+            self.assertTrue(result)
+            self.assertTrue(manager.clipboard.mimeData().hasImage())
+
+            manager.restore_previous_clipboard()
+            self.assertEqual(manager.clipboard.text(QClipboard.Clipboard), "original")
+            manager.close()
+
     def test_displays_clip_index_when_set(self):
         chip = ChipWidget("hello world")
         chip.set_clip_index(3)
@@ -40,11 +61,11 @@ class TestChipWidget(unittest.TestCase):
         self.assertIn(f"font-size: {CLIP_INDEX_FONT_SIZE}px", style)
         chip.deleteLater()
 
-    def test_image_chip_uses_elided_screenshot_label(self):
+    def test_image_chip_uses_elided_file_name(self):
         chip = ChipWidget("C:\\missing\\image.png")
         self.assertEqual(chip.kind, "IMG")
-        self.assertEqual(chip.display_text(), "Screenshot")
-        self.assertIn("Screenshot", chip.title.text())
+        self.assertEqual(chip.display_text(), "image.png")
+        self.assertIn("image.png", chip.title.text())
         chip.deleteLater()
 
 

@@ -280,7 +280,7 @@ class ChipWidget(QWidget):
             return domain.removeprefix("www.") or content
 
         if self.kind == "IMG":
-            return "Screenshot"
+            return os.path.basename(content) or "Screenshot"
 
         if self.kind == "PATH":
             return os.path.basename(content.rstrip("\\/")) or content

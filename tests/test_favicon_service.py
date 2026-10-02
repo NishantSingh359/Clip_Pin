@@ -1,6 +1,7 @@
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 from unittest.mock import patch
 
 from config import FAVICON_WORKERS
@@ -47,6 +48,45 @@ class TestFaviconService(unittest.TestCase):
 
         with patch("core.favicon_service.urlopen", side_effect=TimeoutError()):
             self.assertIsNone(service.download_favicon("https://example.com/favicon.ico"))
+
+    def test_discover_page_icons_accepts_multi_word_rel(self):
+        service = FaviconService(tempfile.mkdtemp())
+        service.executor.shutdown(wait=False)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _limit):
+                return b'<link rel="shortcut icon" href="/favicon.png">'
+
+        with patch("core.favicon_service.urlopen", return_value=FakeResponse()):
+            icons = service.discover_page_icons("https://example.com")
+
+        self.assertEqual(icons, ["https://example.com/favicon.png"])
+
+    def test_download_accepts_small_image_favicon(self):
+        service = FaviconService(tempfile.mkdtemp())
+        service.executor.shutdown(wait=False)
+
+        class FakeResponse(BytesIO):
+            headers = {"content-type": "image/png"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+                return False
+
+        with patch("core.favicon_service.urlopen", return_value=FakeResponse(b"icon")):
+            self.assertEqual(
+                service.download_favicon("https://example.com/favicon"),
+                b"icon",
+            )
 
     def test_inflight_requests_share_one_fetch(self):
         service = FaviconService(tempfile.mkdtemp())

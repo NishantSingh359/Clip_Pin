@@ -124,7 +124,7 @@ class FaviconService:
         icon_urls = []
         for match in re.finditer(r"<link\b[^>]*>", html, flags=re.IGNORECASE):
             tag = match.group(0)
-            rel = re.search(r"""rel=["']?([^"'>\s]+)["']?""", tag, flags=re.IGNORECASE)
+            rel = re.search(r"""rel=["']?([^"'>]+)["']?""", tag, flags=re.IGNORECASE)
             href = re.search(r"""href=["']?([^"'>\s]+)["']?""", tag, flags=re.IGNORECASE)
             if not rel or not href:
                 continue
@@ -150,7 +150,7 @@ class FaviconService:
             "image/" in content_type
             or favicon_url.lower().split("?")[0].endswith((".ico", ".png", ".jpg", ".jpeg", ".webp", ".gif"))
         )
-        if len(data) > 64 and looks_like_image:
+        if data and looks_like_image:
             return data
         return None
 
