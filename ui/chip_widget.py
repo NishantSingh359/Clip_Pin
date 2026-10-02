@@ -20,7 +20,7 @@ from PySide6.QtGui import (
     QPolygon,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication, QLabel, QHBoxLayout, QMenu, QWidget, QSizePolicy
+from PySide6.QtWidgets import QApplication, QLabel, QHBoxLayout, QMenu, QWidget, QSizePolicy, QGraphicsDropShadowEffect
 
 from config import (
     CHIP_BORDER_RADIUS,
@@ -61,6 +61,9 @@ from config import (
     OPEN_ICON_COLOR,
     FOLDER_ICON_COLOR,
     THUMBNAIL_BORDER_RADIUS,
+    THUMBNAIL_SHADOW_BLUR_RADIUS,
+    THUMBNAIL_SHADOW_OFFSET,
+    THUMBNAIL_SHADOW_COLOR,
     MOTION_BASE_MS,
     MOTION_FAST_MS,
     MOTION_HOVER_MS,
@@ -158,6 +161,12 @@ class ChipWidget(QWidget):
                 font-weight: 800;
             }}
         """)
+        if THUMBNAIL_SHADOW_BLUR_RADIUS > 0:
+            thumbnail_shadow = QGraphicsDropShadowEffect(self.icon)
+            thumbnail_shadow.setBlurRadius(THUMBNAIL_SHADOW_BLUR_RADIUS)
+            thumbnail_shadow.setOffset(*THUMBNAIL_SHADOW_OFFSET)
+            thumbnail_shadow.setColor(parse_color(THUMBNAIL_SHADOW_COLOR))
+            self.icon.setGraphicsEffect(thumbnail_shadow)
 
         self.title = QLabel()
         self.title.setAlignment(Qt.AlignVCenter)
