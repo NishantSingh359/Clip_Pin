@@ -1,6 +1,7 @@
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, QTimer
+from PySide6.QtGui import QCursor
 from PySide6.QtGui import QPainterPath, QRegion
-from PySide6.QtWidgets import QScrollArea, QSizePolicy
+from PySide6.QtWidgets import QScrollArea, QSizePolicy, QWidget
 
 from config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS, SCROLL_VIEWPORT_BORDER_RADIUS
 
@@ -36,6 +37,8 @@ class ChipBar(QScrollArea):
         self._scroll_animation = QPropertyAnimation(self, b"scroll_value", self)
         self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
         self._scroll_animation.setDuration(CHIP_SCROLL_DURATION_MS)
+        self.horizontalScrollBar().valueChanged.connect(self._refresh_chip_hover)
+        self._scroll_animation.finished.connect(self._refresh_chip_hover)
 
         self._update_viewport_mask()
 
@@ -65,6 +68,32 @@ class ChipBar(QScrollArea):
         path = QPainterPath()
         path.addRoundedRect(rect, SCROLL_VIEWPORT_BORDER_RADIUS, SCROLL_VIEWPORT_BORDER_RADIUS)
         viewport.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def _refresh_chip_hover(self):
+        content_widget = self.widget()
+        if content_widget is None:
+            return
+
+        cursor_position = QCursor.pos()
+        viewport_position = self.viewport().mapFromGlobal(cursor_position)
+        cursor_in_viewport = self.viewport().rect().contains(viewport_position)
+        self._apply_chip_hover(
+            content_widget.findChildren(QWidget),
+            cursor_position,
+            cursor_in_viewport,
+        )
+
+    def _apply_chip_hover(self, chips, cursor_position, cursor_in_viewport):
+        for chip in chips:
+            if not hasattr(chip, "set_hovered"):
+                continue
+            is_hovered = (
+                cursor_in_viewport
+                and chip.isVisible()
+                and chip.rect().contains(chip.mapFromGlobal(cursor_position))
+            )
+            chip.set_hovered(is_hovered)
+
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y() or event.angleDelta().x()

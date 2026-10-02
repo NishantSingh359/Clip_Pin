@@ -4,7 +4,7 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData, QBuffer, QIODevice
+from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData, QBuffer, QIODevice, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -64,9 +64,11 @@ from config import (
     THUMBNAIL_SHADOW_BLUR_RADIUS,
     THUMBNAIL_SHADOW_OFFSET,
     THUMBNAIL_SHADOW_COLOR,
+    MOTION_ENABLED,
     MOTION_BASE_MS,
     MOTION_FAST_MS,
     MOTION_HOVER_MS,
+    CHIP_HOVER_COLOR_DURATION_MS,
 )
 from core.favicon_service import get_favicon_service
 from utils.app_logging import log_exception, safe_slot
@@ -94,6 +96,7 @@ class ChipWidget(QWidget):
         self.network = None
         self._destroyed = False
         self._background_color = parse_color(CHIP_DEFAULT_BACKGROUND)
+        self._background_animation = None
         self._is_hovered = False
         self._is_deleting = False
         self._drag_start_position = None
@@ -211,9 +214,32 @@ class ChipWidget(QWidget):
         return parse_color(CHIP_DEFAULT_BACKGROUND)
 
     def animate_background_to(self, color, duration=MOTION_HOVER_MS):
-        # Animations removed: immediately apply background color
-        self._background_color = parse_color(color)
-        self.apply_style()
+        target_color = parse_color(color)
+        if self._background_color == target_color:
+            return
+
+        if self._background_animation is not None:
+            self._background_animation.stop()
+
+        if not MOTION_ENABLED or CHIP_HOVER_COLOR_DURATION_MS <= 0:
+            self.set_background_color(target_color)
+            return
+
+        animation = QPropertyAnimation(self, b"backgroundColor", self)
+        animation.setDuration(CHIP_HOVER_COLOR_DURATION_MS)
+        animation.setStartValue(self._background_color)
+        animation.setEndValue(target_color)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._background_animation = animation
+        animation.start()
+
+    def set_hovered(self, hovered):
+        hovered = bool(hovered)
+        if self._is_hovered == hovered:
+            return
+        self._is_hovered = hovered
+        if not self._is_deleting:
+            self.animate_background_to(self.state_background(), MOTION_HOVER_MS)
 
     def animate_entry(self, duration=MOTION_BASE_MS):
         # Animations removed: immediately set to base width and show

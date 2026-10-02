@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
+from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
 from ui.main_window import MainWindow
 
@@ -279,6 +280,40 @@ class TestRuntimeSmoke(unittest.TestCase):
 
         self.assertTrue(event.ignored)
         window.deleteLater()
+
+    def test_scroll_refreshes_hover_for_chip_under_stationary_cursor(self):
+        class FakeRect:
+            def __init__(self, contains):
+                self._contains = contains
+
+            def contains(self, _point):
+                return self._contains
+
+        class FakeChip:
+            def __init__(self, contains_cursor, hovered):
+                self._is_hovered = hovered
+                self._contains_cursor = contains_cursor
+
+            def isVisible(self):
+                return True
+
+            def rect(self):
+                return FakeRect(self._contains_cursor)
+
+            def mapFromGlobal(self, _position):
+                return QPoint(0, 0)
+
+            def set_hovered(self, hovered):
+                self._is_hovered = hovered
+
+        first = FakeChip(contains_cursor=False, hovered=True)
+        second = FakeChip(contains_cursor=True, hovered=False)
+        chip_bar = ChipBar.__new__(ChipBar)
+
+        chip_bar._apply_chip_hover([first, second], QPoint(10, 10), True)
+
+        self.assertFalse(first._is_hovered)
+        self.assertTrue(second._is_hovered)
 
     def test_dragdrop_invalid_data_is_ignored(self):
         handler = DragDropHandler(tempfile.mkdtemp())

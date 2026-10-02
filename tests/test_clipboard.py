@@ -7,7 +7,7 @@ from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QUrl
 from PySide6.QtGui import QClipboard, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
-from config import CHIP_TEXT_FONT_SIZE, CLIP_INDEX_FONT_SIZE, CLIP_INDEX_TEXT_COLOR
+from config import CHIP_HOVER_BACKGROUND, CHIP_HOVER_COLOR_DURATION_MS, CHIP_TEXT_FONT_SIZE, CLIP_INDEX_FONT_SIZE, CLIP_INDEX_TEXT_COLOR
 from core.clipboard_manager import ClipboardManager
 from ui.chip_widget import ChipWidget
 
@@ -36,6 +36,16 @@ class TestChipWidget(unittest.TestCase):
 
         self.assertEqual(chip.icon.pixmap().toImage(), loaded_pixmap)
         self.assertEqual((chip.icon.pixmap().width(), chip.icon.pixmap().height()), (22, 22))
+        chip.deleteLater()
+
+    def test_hover_background_uses_configured_smooth_transition(self):
+        chip = ChipWidget("hover test")
+
+        chip.set_hovered(True)
+
+        self.assertIsNotNone(chip._background_animation)
+        self.assertEqual(chip._background_animation.duration(), CHIP_HOVER_COLOR_DURATION_MS)
+        self.assertEqual(chip._background_animation.endValue().name(), "#3c3c3c")
         chip.deleteLater()
 
     def test_transient_paste_restores_previous_clipboard_content(self):
