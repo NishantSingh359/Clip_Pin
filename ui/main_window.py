@@ -164,6 +164,7 @@ class MainWindow(QWidget):
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
         self.clipboard_manager.text_copied.connect(self.add_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
+        self.clipboard_manager.path_copied.connect(self.add_clip)
 
         self.animation = QPropertyAnimation(self, b"pos")
         self.animation.setDuration(MOTION_SHELF_MS)

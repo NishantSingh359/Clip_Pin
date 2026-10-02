@@ -1,5 +1,6 @@
 from hashlib import sha256
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Lock
 
 from PySide6.QtCore import QObject, QBuffer, Signal
@@ -14,6 +15,7 @@ from utils.app_logging import log_exception, safe_slot
 class ClipboardManager(QObject):
     text_copied = Signal(str)
     image_copied = Signal(str)
+    path_copied = Signal(str)
 
     def __init__(self, base_dir):
         super().__init__()
@@ -116,6 +118,22 @@ class ClipboardManager(QObject):
             self._image_executor.submit(self._process_image, image.copy(), image_hash, True)
             return
 
+        if mime.hasUrls():
+            paths = [
+                Path(url.toLocalFile())
+                for url in mime.urls()
+                if url.isLocalFile() and Path(url.toLocalFile()).exists()
+            ]
+            if paths:
+                for path in paths:
+                    content = str(path)
+                    try:
+                        self.db.insert_with_type(content, "path")
+                        self.path_copied.emit(content)
+                    except Exception:
+                        log_exception("Failed to store clipboard path")
+                return
+
 
         if not mime.hasText():
             return
@@ -126,8 +144,12 @@ class ClipboardManager(QObject):
 
         self._last_text = text
         try:
-            self.db.insert(text)
-            self.text_copied.emit(text)
+            if Path(text).exists():
+                self.db.insert_with_type(text, "path")
+                self.path_copied.emit(text)
+            else:
+                self.db.insert(text)
+                self.text_copied.emit(text)
         except Exception:
             log_exception("Failed to store text clipboard item")
 
@@ -183,4 +205,8 @@ class ClipboardManager(QObject):
         return None
 
     def close(self):
+        try:
+            self.clipboard.dataChanged.disconnect(self.on_data_changed)
+        except (RuntimeError, TypeError):
+            pass
         self._image_executor.shutdown(wait=False, cancel_futures=True)

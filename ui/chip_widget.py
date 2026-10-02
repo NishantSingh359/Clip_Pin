@@ -1,9 +1,10 @@
 import os
 import sys
+from base64 import b64encode
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData
+from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData, QBuffer, QIODevice
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -11,6 +12,7 @@ from PySide6.QtGui import (
     QDrag,
     QFont,
     QFontMetrics,
+    QImage,
     QPainter,
     QPainterPath,
     QPen,
@@ -33,6 +35,7 @@ from config import (
     CHIP_PRESSED_BACKGROUND,
     CHIP_SPACING,
     CHIP_TEXT_COLOR,
+    CHIP_TEXT_FONT_SIZE,
     CHIP_MAX_WIDTH,
     CHIP_MIN_WIDTH,
     CHIP_HEIGHT,
@@ -52,6 +55,7 @@ from config import (
     CONTEXT_MENU_ITEM_PADDING,
     OPEN_ICON_PATH,
     FOLDER_ICON_PATH,
+    FILE_ICON_PATH,
     OPEN_ICON_SIZE,
     FOLDER_ICON_SIZE,
     OPEN_ICON_COLOR,
@@ -161,7 +165,7 @@ class ChipWidget(QWidget):
         self.title.setStyleSheet(f"""
             QLabel {{
                 color: {CHIP_TEXT_COLOR};
-                font-size: 13px;
+                font-size: {CHIP_TEXT_FONT_SIZE}px;
                 font-weight: 600;
             }}
         """)
@@ -232,6 +236,9 @@ class ChipWidget(QWidget):
         if content.startswith(("http://", "https://")):
             return "LINK"
 
+        if Path(content).name.lower().startswith("screenshot") and content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            return "IMG"
+
         if content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
             return "IMG"
 
@@ -263,7 +270,7 @@ class ChipWidget(QWidget):
         elif self.kind == "PATH":
             self.icon.show()
             self.icon.setFixedSize(FOLDER_ICON_SIZE, FOLDER_ICON_SIZE)
-            self.icon.setPixmap(self.load_folder_icon_pixmap())
+            self.icon.setPixmap(self.load_path_icon_pixmap())
         else:
             self.icon.hide()
 
@@ -280,7 +287,7 @@ class ChipWidget(QWidget):
             return domain.removeprefix("www.") or content
 
         if self.kind == "IMG":
-            return os.path.basename(content) or "Screenshot"
+            return "Screenshot" if Path(content).name.lower().startswith("screenshot") else os.path.basename(content)
 
         if self.kind == "PATH":
             return os.path.basename(content.rstrip("\\/")) or content
@@ -572,6 +579,13 @@ class ChipWidget(QWidget):
         painter.end()
         return pixmap
 
+    def load_path_icon_pixmap(self):
+        icon_path = FOLDER_ICON_PATH if os.path.isdir(self.content) else FILE_ICON_PATH
+        pix = self._load_icon_pixmap(icon_path, FOLDER_ICON_SIZE, self.parse_css_color(FOLDER_ICON_COLOR))
+        if not pix.isNull():
+            return pix
+        return self._load_icon_pixmap(FOLDER_ICON_PATH, FOLDER_ICON_SIZE, self.parse_css_color(FOLDER_ICON_COLOR))
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.animate_press()
@@ -660,7 +674,33 @@ class ChipWidget(QWidget):
 
     def _start_drag(self):
         drag = QDrag(self)
+        include_file_url = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
+        mime_data = self.create_drag_mime_data(include_file_url=include_file_url)
+        drag.setMimeData(mime_data)
+        drag.setPixmap(self.grab())
+        drag.exec(Qt.CopyAction | Qt.MoveAction)
+
+    def create_drag_mime_data(self, include_file_url=False):
         mime_data = QMimeData()
+        if self.kind == "IMG":
+            image = QImage(self.content)
+            if not image.isNull():
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                image.save(buffer, "PNG")
+                png_data = bytes(buffer.data())
+                buffer.close()
+
+                mime_data.setImageData(image)
+                mime_data.setData("image/png", png_data)
+                encoded_image = b64encode(png_data).decode("ascii")
+                mime_data.setHtml(f'<img src="data:image/png;base64,{encoded_image}">')
+                if include_file_url and Path(self.content).exists():
+                    image_url = QUrl.fromLocalFile(self.content)
+                    mime_data.setUrls([image_url])
+                    mime_data.setData("text/uri-list", image_url.toString().encode("utf-8"))
+                return mime_data
+
         mime_data.setText(self.content)
         mime_data.setData("text/plain", self.content.encode("utf-8"))
         mime_data.setData("text/plain;charset=utf-8", self.content.encode("utf-8"))
@@ -684,9 +724,7 @@ class ChipWidget(QWidget):
             mime_data.setUrls([QUrl.fromLocalFile(self.content)])
             mime_data.setData("text/uri-list", QUrl.fromLocalFile(self.content).toString().encode("utf-8"))
 
-        drag.setMimeData(mime_data)
-        drag.setPixmap(self.grab())
-        drag.exec(Qt.CopyAction | Qt.MoveAction)
+        return mime_data
 
     def _html_preview(self):
         if self.kind == "LINK":
