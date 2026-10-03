@@ -4,23 +4,34 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Property, Qt, QUrl, Signal, QPoint, QSize, QMimeData, QBuffer, QIODevice, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import QByteArray, Property, Qt, QUrl, Signal, QPoint, QSize, QRectF, QMimeData, QBuffer, QIODevice, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import (
-    QAction,
     QColor,
     QDesktopServices,
     QDrag,
     QFont,
     QFontMetrics,
+    QIcon,
     QImage,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
     QPolygon,
+    QRegion,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication, QLabel, QHBoxLayout, QMenu, QWidget, QSizePolicy, QGraphicsDropShadowEffect
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QHBoxLayout,
+    QMenu,
+    QWidget,
+    QSizePolicy,
+    QGraphicsDropShadowEffect,
+    QToolButton,
+    QWidgetAction,
+)
 
 from config import (
     CHIP_BORDER_RADIUS,
@@ -43,16 +54,25 @@ from config import (
     CLIP_INDEX_FONT_SIZE,
     CLIP_INDEX_FONT_WEIGHT,
     CLIP_INDEX_TEXT_COLOR,
-    CONTEXT_MENU_FONT_SIZE,
-    CONTEXT_MENU_TEXT_FONT_WEIGHT,
-    CONTEXT_MENU_BACKGROUND_COLOR,
-    CONTEXT_MENU_BORDER_WIDTH,
-    CONTEXT_MENU_TEXT_COLOR,
-    CONTEXT_MENU_BORDER_COLOR,
-    CONTEXT_MENU_HOVER_COLOR,
-    CONTEXT_MENU_HOVER_BORDER_RADIUS,
-    CONTEXT_MENU_BORDER_RADIUS,
-    CONTEXT_MENU_ITEM_PADDING,
+    CHIP_CONTEXT_MENU_BACKGROUND_COLOR,
+    CHIP_CONTEXT_MENU_ICON_COLOR,
+    CHIP_CONTEXT_MENU_BORDER_COLOR,
+    CHIP_CONTEXT_MENU_HOVER_COLOR,
+    CHIP_CONTEXT_MENU_BORDER_WIDTH,
+    CHIP_CONTEXT_MENU_BORDER_RADIUS,
+    CHIP_CONTEXT_MENU_PADDING,
+    CHIP_CONTEXT_MENU_ITEM_SIZE,
+    CHIP_CONTEXT_MENU_ITEM_PADDING,
+    CHIP_CONTEXT_MENU_ITEM_MARGIN,
+    CHIP_CONTEXT_MENU_ITEM_BORDER_RADIUS,
+    CHIP_CONTEXT_MENU_ICON_SIZE,
+    CHIP_CONTEXT_MENU_ICON_STROKE_WIDTH,
+    CHIP_CONTEXT_MENU_DESTRUCTIVE_ICON_COLOR,
+    CHIP_CONTEXT_MENU_PIN_ICON,
+    CHIP_CONTEXT_MENU_UNPIN_ICON,
+    CHIP_CONTEXT_MENU_COPY_ICON,
+    CHIP_CONTEXT_MENU_DELETE_ICON,
+    CHIP_CONTEXT_MENU_CLEAR_ICON,
     OPEN_ICON_PATH,
     FOLDER_ICON_PATH,
     FILE_ICON_PATH,
@@ -76,6 +96,78 @@ from ui.animations import (
     color_to_rgba,
     parse_color,
 )
+
+
+class ChipContextMenu(QMenu):
+    def _effective_corner_radius(self):
+        if self.width() <= 0 or self.height() <= 0:
+            return CHIP_CONTEXT_MENU_BORDER_RADIUS
+        return min(
+            CHIP_CONTEXT_MENU_BORDER_RADIUS,
+            self.width() / 2,
+            self.height() / 2,
+        )
+
+    def _apply_menu_shape(self):
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        radius = self._effective_corner_radius()
+        self.setStyleSheet(f'''
+            QMenu {{
+                background: transparent;
+                border: none;
+                padding: {CHIP_CONTEXT_MENU_PADDING}px;
+            }}
+        ''')
+
+        path = QPainterPath()
+        path.addRoundedRect(self.rect(), radius, radius)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def paintEvent(self, event):
+        if self.width() <= 0 or self.height() <= 0:
+            super().paintEvent(event)
+            return
+
+        outer_radius = self._effective_corner_radius()
+        background_path = QPainterPath()
+        background_path.addRoundedRect(self.rect(), outer_radius, outer_radius)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(parse_color(CHIP_CONTEXT_MENU_BACKGROUND_COLOR))
+        painter.drawPath(background_path)
+        painter.end()
+
+        super().paintEvent(event)
+
+        border_width = CHIP_CONTEXT_MENU_BORDER_WIDTH
+        if border_width <= 0:
+            return
+
+        inset = border_width / 2
+        border_rect = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
+        border_path = QPainterPath()
+        border_path.addRoundedRect(
+            border_rect,
+            max(0, outer_radius - inset),
+            max(0, outer_radius - inset),
+        )
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(parse_color(CHIP_CONTEXT_MENU_BORDER_COLOR), border_width))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(border_path)
+        painter.end()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_menu_shape()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_menu_shape()
 
 
 class ChipWidget(QWidget):
@@ -671,50 +763,84 @@ class ChipWidget(QWidget):
         super().leaveEvent(event)
 
     def show_context_menu(self, position):
-        menu = QMenu(self)
+        menu = ChipContextMenu(self)
+        menu.setWindowFlags(
+            menu.windowFlags()
+            | Qt.FramelessWindowHint
+            | Qt.NoDropShadowWindowHint
+        )
         menu.setAttribute(Qt.WA_TranslucentBackground)
-        pin_label = "Unpin" if self.pinned else "Pin"
-        pin_action = QAction(pin_label, self)
-        copy_again_action = QAction("Copy Again", self)
-        delete_action = QAction("Delete", self)
-        clear_all_action = QAction("Clear All", self)
 
-        menu.addAction(pin_action)
-        menu.addAction(copy_again_action)
-        menu.addAction(delete_action)
-        menu.addAction(clear_all_action)
+        def make_menu_icon(paths, color):
+            svg = (
+                f'<svg xmlns="http://www.w3.org/2000/svg" width="{CHIP_CONTEXT_MENU_ICON_SIZE}" '
+                'height="24" viewBox="0 0 24 24">'
+                f'<g fill="none" stroke="{color}" stroke-width="{CHIP_CONTEXT_MENU_ICON_STROKE_WIDTH}" '
+                f'stroke-linecap="round" stroke-linejoin="round">{paths}</g></svg>'
+            )
+            renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+            icon_size = max(1, CHIP_CONTEXT_MENU_ICON_SIZE)
+            pixmap = QPixmap(icon_size, icon_size)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            return QIcon(pixmap)
 
-        menu.setStyleSheet(f'''
-            QMenu {{
-                font-size: {CONTEXT_MENU_FONT_SIZE}px;
-                font-weight: {CONTEXT_MENU_TEXT_FONT_WEIGHT};
-                background-color: {CONTEXT_MENU_BACKGROUND_COLOR};
-                color: {CONTEXT_MENU_TEXT_COLOR};
-                border: {CONTEXT_MENU_BORDER_WIDTH}px solid {CONTEXT_MENU_BORDER_COLOR};
-                border-radius: {CONTEXT_MENU_BORDER_RADIUS}px;
-                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
-            }}
-            QMenu::item {{
-                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
-            }}
-            QMenu::item:selected {{
-                background-color: {CONTEXT_MENU_HOVER_COLOR};
-                border-radius: {CONTEXT_MENU_HOVER_BORDER_RADIUS}px;
-            }}
-        ''')
+        normal_icon_color = parse_color(CHIP_CONTEXT_MENU_ICON_COLOR).name()
+        destructive_icon_color = CHIP_CONTEXT_MENU_DESTRUCTIVE_ICON_COLOR
+        pin_icon = CHIP_CONTEXT_MENU_UNPIN_ICON if self.pinned else CHIP_CONTEXT_MENU_PIN_ICON
 
-        action = menu.exec(self.mapToGlobal(position))
+        def add_icon_action(icon, callback):
+            action = QWidgetAction(menu)
 
-        if action == pin_action:
+            row_size = CHIP_CONTEXT_MENU_ITEM_SIZE + 2 * CHIP_CONTEXT_MENU_ITEM_PADDING
+            button = QToolButton(menu)
+            button.setFixedSize(
+                row_size + 2 * CHIP_CONTEXT_MENU_ITEM_MARGIN,
+                row_size + 2 * CHIP_CONTEXT_MENU_ITEM_MARGIN,
+            )
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            button.setIcon(icon)
+            button.setIconSize(QSize(CHIP_CONTEXT_MENU_ICON_SIZE, CHIP_CONTEXT_MENU_ICON_SIZE))
+            button.setCursor(Qt.PointingHandCursor)
+            button.setStyleSheet(f'''
+                QToolButton {{
+                    background: transparent;
+                    border: none;
+                    margin: {CHIP_CONTEXT_MENU_ITEM_MARGIN}px;
+                    border-radius: {CHIP_CONTEXT_MENU_ITEM_BORDER_RADIUS}px;
+                }}
+                QToolButton:hover, QToolButton:focus {{
+                    background-color: {CHIP_CONTEXT_MENU_HOVER_COLOR};
+                }}
+            ''')
+            action.setDefaultWidget(button)
+            action.triggered.connect(lambda checked=False: (callback(), menu.close()))
+            button.clicked.connect(action.trigger)
+            menu.addAction(action)
+            return action
+
+        def toggle_pin():
             self.pinned = not self.pinned
             self.animate_background_to(self.state_background(), MOTION_BASE_MS)
             self.pin_requested.emit(self.content)
-        elif action == copy_again_action:
-            self.copy_again_requested.emit(self.content)
-        elif action == delete_action:
-            self.delete_requested.emit(self.content)
-        elif action == clear_all_action:
-            self.clear_all_requested.emit()
+
+        pin_action = add_icon_action(make_menu_icon(pin_icon, normal_icon_color), toggle_pin)
+        copy_again_action = add_icon_action(
+            make_menu_icon(CHIP_CONTEXT_MENU_COPY_ICON, normal_icon_color),
+            lambda: self.copy_again_requested.emit(self.content),
+        )
+        delete_action = add_icon_action(
+            make_menu_icon(CHIP_CONTEXT_MENU_DELETE_ICON, destructive_icon_color),
+            lambda: self.delete_requested.emit(self.content),
+        )
+        clear_all_action = add_icon_action(
+            make_menu_icon(CHIP_CONTEXT_MENU_CLEAR_ICON, destructive_icon_color),
+            lambda: self.clear_all_requested.emit(),
+        )
+
+        menu.exec(self.mapToGlobal(position))
 
     def _start_drag(self):
         drag = QDrag(self)

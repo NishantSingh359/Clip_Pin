@@ -34,16 +34,6 @@ from ui.animations import animate_widget_positions, expand_and_fade_in, fade, pa
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
-    CONTEXT_MENU_FONT_SIZE,
-    CONTEXT_MENU_BACKGROUND_COLOR,
-    CONTEXT_MENU_BORDER_COLOR,
-    CONTEXT_MENU_BORDER_RADIUS,
-    CONTEXT_MENU_HOVER_BORDER_RADIUS,
-    CONTEXT_MENU_HOVER_COLOR,
-    CONTEXT_MENU_ITEM_PADDING,
-    CONTEXT_MENU_TEXT_COLOR,
-    CONTEXT_MENU_TEXT_FONT_WEIGHT,
-    CONTEXT_MENU_BORDER_WIDTH,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
     EMPTY_STATE_PADDING,
@@ -575,20 +565,20 @@ class MainWindow(QWidget):
 
         menu.setStyleSheet(f'''
             QMenu {{
-                font-size: {CONTEXT_MENU_FONT_SIZE}px;
-                font-weight: {CONTEXT_MENU_TEXT_FONT_WEIGHT};
-                background-color: {CONTEXT_MENU_BACKGROUND_COLOR};
-                color: {CONTEXT_MENU_TEXT_COLOR};
-                border: {CONTEXT_MENU_BORDER_WIDTH}px solid {CONTEXT_MENU_BORDER_COLOR};
-                border-radius: {CONTEXT_MENU_BORDER_RADIUS}px;
-                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
+                font-size: 13px;
+                font-weight: 600;
+                background-color: rgba(20, 20, 20, 1);
+                color: rgba(200, 200, 200, 1);
+                border: 0px solid rgba(150, 150, 150, 0.05);
+                border-radius: 0px;
+                padding: 5px 5px;
             }}
             QMenu::item {{
-                padding: {CONTEXT_MENU_ITEM_PADDING[0]}px {CONTEXT_MENU_ITEM_PADDING[1]}px;
+                padding: 5px 5px;
             }}
             QMenu::item:selected {{
-                background-color: {CONTEXT_MENU_HOVER_COLOR};
-                border-radius: {CONTEXT_MENU_HOVER_BORDER_RADIUS}px;
+                background-color: rgba(40, 40, 40, 0.9);
+                border-radius: 5px;
             }}
         ''')
 
