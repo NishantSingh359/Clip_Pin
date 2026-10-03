@@ -178,10 +178,12 @@ class ChipWidget(QWidget):
     clear_all_requested = Signal()
     favicon_loaded = Signal(bytes)
 
-    def __init__(self, content):
+    def __init__(self, content, min_width=CHIP_MIN_WIDTH, max_width=CHIP_MAX_WIDTH):
         super().__init__()
 
         self.content = content
+        self.min_width = min_width
+        self.max_width = max(max_width, min_width)
         self.clip_index = None
         self.kind = self.detect_kind()
         self.pinned = False
@@ -197,14 +199,14 @@ class ChipWidget(QWidget):
         self.setObjectName("chip")
 
         self.setFixedHeight(CHIP_HEIGHT)
-        self.setMinimumWidth(CHIP_MIN_WIDTH)
-        self.setMaximumWidth(CHIP_MAX_WIDTH)
+        self.setMinimumWidth(self.min_width)
+        self.setMaximumWidth(self.max_width)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
-        self._base_width = CHIP_MIN_WIDTH
+        self._base_width = self.min_width
         self._base_height = CHIP_HEIGHT
 
         self.setup_ui()
@@ -380,11 +382,11 @@ class ChipWidget(QWidget):
         metrics = QFontMetrics(self.title.font())
         index_width = self.index_label.sizeHint().width() + CHIP_SPACING if self.index_label.isVisible() else 0
         if self.kind == "LINK":
-            title_width = CHIP_MAX_WIDTH - 68 - index_width
+            title_width = self.max_width - 68 - index_width
         elif self.kind == "IMG":
-            title_width = CHIP_MAX_WIDTH - 34 - index_width
+            title_width = self.max_width - 34 - index_width
         else:
-            title_width = CHIP_MAX_WIDTH - 42 - index_width
+            title_width = self.max_width - 42 - index_width
         title_width = max(36, title_width)
         self.title.setText(metrics.elidedText(text, Qt.ElideRight, title_width))
 
@@ -406,9 +408,11 @@ class ChipWidget(QWidget):
             self.icon.hide()
 
         self.adjustSize()
-        width = max(CHIP_MIN_WIDTH, min(self.sizeHint().width(), CHIP_MAX_WIDTH))
+        width = max(self.min_width, min(self.sizeHint().width(), self.max_width))
         self._base_width = width
-        self.setFixedWidth(width)
+        self.setMinimumWidth(self.min_width)
+        self.setMaximumWidth(self.max_width)
+        self.resize(width, self._base_height)
         self.setFixedHeight(self._base_height)
 
     def display_text(self):

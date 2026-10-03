@@ -41,6 +41,11 @@ from ui.animations import animate_widget_positions, expand_and_fade_in, fade, pa
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
+    CHIP_MIN_WIDTH,
+    CHIP_MAX_WIDTH,
+    CHIP_WIDTH_MIN_LIMIT,
+    CHIP_WIDTH_MAX_LIMIT,
+    CHIP_WIDTH_DEFAULTS_VERSION,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
     EMPTY_STATE_PADDING,
@@ -64,6 +69,8 @@ from config import (
     HIDE_ON_PASTE,
     clip_indexing,
     SHELF_WIDTH_RATIO,
+    SHELF_WIDTH_RATIO_MIN,
+    SHELF_WIDTH_RATIO_MAX,
     SHELF_BACKGROUND_COLOR,
     SHELF_BORDER_COLOR,
     SHELF_BORDER_WIDTH,
@@ -141,6 +148,9 @@ class MainWindow(QWidget):
         self.clip_indexing_enabled = clip_indexing
         self.close_to_tray_enabled = True
         self.start_with_windows_enabled = False
+        self.chip_min_width = CHIP_MIN_WIDTH
+        self.chip_max_width = CHIP_MAX_WIDTH
+        self.shelf_width_ratio = SHELF_WIDTH_RATIO
         self._settings_dialog = None
         self._shadow_margin = max(
             0,
@@ -265,7 +275,7 @@ class MainWindow(QWidget):
         if content in self.chips_by_content:
             return
 
-        chip = ChipWidget(content)
+        chip = ChipWidget(content, self.chip_min_width, self.chip_max_width)
         chip.paste_requested.connect(self.paste_clip)
         chip.copy_again_requested.connect(self.copy_again_clip)
         chip.delete_requested.connect(self.remove_clip)
@@ -536,11 +546,33 @@ class MainWindow(QWidget):
         try:
             with settings_path.open("r", encoding="utf-8") as settings_file:
                 settings = json.load(settings_file)
+            needs_sizing_defaults_migration = (
+                settings.get("chip_width_defaults_version", 0) < CHIP_WIDTH_DEFAULTS_VERSION
+            )
             self.show_on_hover_enabled = bool(settings.get("show_on_hover_enabled", self.show_on_hover_enabled))
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
             self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
+            if needs_sizing_defaults_migration:
+                self.chip_min_width = CHIP_MIN_WIDTH
+                self.chip_max_width = CHIP_MAX_WIDTH
+                self.shelf_width_ratio = SHELF_WIDTH_RATIO
+            else:
+                self.chip_min_width = max(
+                    CHIP_WIDTH_MIN_LIMIT,
+                    min(CHIP_WIDTH_MAX_LIMIT, int(settings.get("chip_min_width", self.chip_min_width))),
+                )
+                self.chip_max_width = max(
+                    self.chip_min_width,
+                    min(CHIP_WIDTH_MAX_LIMIT, int(settings.get("chip_max_width", self.chip_max_width))),
+                )
+                self.shelf_width_ratio = max(
+                    SHELF_WIDTH_RATIO_MIN,
+                    min(SHELF_WIDTH_RATIO_MAX, float(settings.get("shelf_width_ratio", self.shelf_width_ratio))),
+                )
+            if needs_sizing_defaults_migration:
+                self._save_context_menu_settings()
         except Exception as exc:
             log_exception(f"Failed to load context menu settings: {exc}")
 
@@ -555,6 +587,10 @@ class MainWindow(QWidget):
                         "clip_indexing_enabled": self.clip_indexing_enabled,
                         "close_to_tray_enabled": self.close_to_tray_enabled,
                         "start_with_windows_enabled": self.start_with_windows_enabled,
+                        "chip_min_width": self.chip_min_width,
+                        "chip_max_width": self.chip_max_width,
+                        "shelf_width_ratio": self.shelf_width_ratio,
+                        "chip_width_defaults_version": CHIP_WIDTH_DEFAULTS_VERSION,
                     },
                     settings_file,
                     indent=2,
@@ -605,15 +641,69 @@ class MainWindow(QWidget):
             show_clip_indexes=self.clip_indexing_enabled,
             close_to_tray=self.close_to_tray_enabled,
             start_with_windows=self.start_with_windows_enabled,
+            chip_min_width=self.chip_min_width,
+            chip_max_width=self.chip_max_width,
+            shelf_width_ratio=self.shelf_width_ratio,
             on_show_on_hover=self.set_show_on_hover_enabled,
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
             on_close_to_tray=self.set_close_to_tray_enabled,
             on_start_with_windows=self.set_start_with_windows_enabled,
+            on_chip_min_width=self.set_chip_min_width,
+            on_chip_max_width=self.set_chip_max_width,
+            on_shelf_width_ratio=self.set_shelf_width_ratio,
             parent=None,
         )
         self._settings_dialog.setWindowIcon(self.tray_icon.icon())
         self._settings_dialog.show()
+
+    def set_chip_min_width(self, width):
+        self.chip_min_width = max(
+            CHIP_WIDTH_MIN_LIMIT,
+            min(CHIP_WIDTH_MAX_LIMIT, int(width)),
+        )
+        if self.chip_min_width > self.chip_max_width:
+            self.chip_max_width = self.chip_min_width
+            if self._settings_dialog is not None:
+                self._settings_dialog.chip_max_width.blockSignals(True)
+                self._settings_dialog.chip_max_width.setValue(self.chip_max_width)
+                self._settings_dialog.chip_max_width.blockSignals(False)
+        self._apply_chip_width_settings()
+
+    def set_chip_max_width(self, width):
+        self.chip_max_width = max(
+            CHIP_WIDTH_MIN_LIMIT,
+            min(CHIP_WIDTH_MAX_LIMIT, int(width)),
+        )
+        if self.chip_max_width < self.chip_min_width:
+            self.chip_min_width = self.chip_max_width
+            if self._settings_dialog is not None:
+                self._settings_dialog.chip_min_width.blockSignals(True)
+                self._settings_dialog.chip_min_width.setValue(self.chip_min_width)
+                self._settings_dialog.chip_min_width.blockSignals(False)
+        self._apply_chip_width_settings()
+
+    def _apply_chip_width_settings(self):
+        for chip in self.chips_by_content.values():
+            chip.min_width = self.chip_min_width
+            chip.max_width = self.chip_max_width
+            chip.setMinimumWidth(self.chip_min_width)
+            chip.setMaximumWidth(self.chip_max_width)
+            chip.update_label()
+        self._save_context_menu_settings()
+
+    def set_shelf_width_ratio(self, ratio):
+        self.shelf_width_ratio = max(
+            SHELF_WIDTH_RATIO_MIN,
+            min(SHELF_WIDTH_RATIO_MAX, float(ratio)),
+        )
+        self._screen_geometry_cache_key = None
+        self.update_screen_geometry()
+        if self.is_open:
+            self.animate_to(self.open_pos)
+        else:
+            self.move(self.hidden_pos)
+        self._save_context_menu_settings()
 
     def set_close_to_tray_enabled(self, enabled):
         self.close_to_tray_enabled = bool(enabled)
@@ -813,7 +903,7 @@ class MainWindow(QWidget):
             return
 
         self._screen_geometry_cache_key = cache_key
-        width = max(720, int(geometry.width() * SHELF_WIDTH_RATIO))
+        width = max(720, int(geometry.width() * self.shelf_width_ratio))
         width = min(width, geometry.width() - 32)
 
         window_width = width + self._shadow_margin * 2

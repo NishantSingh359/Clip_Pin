@@ -1,7 +1,21 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QDialog, QLabel, QVBoxLayout
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+)
 
 from config import (
+    CHIP_WIDTH_MIN_LIMIT,
+    CHIP_WIDTH_MAX_LIMIT,
+    SETTINGS_WINDOW_SECTION_SPACING,
+    SHELF_WIDTH_RATIO_MIN,
+    SHELF_WIDTH_RATIO_MAX,
     SETTINGS_WINDOW_BACKGROUND_COLOR,
     SETTINGS_WINDOW_BUTTON_BACKGROUND_COLOR,
     SETTINGS_WINDOW_BUTTON_BORDER_COLOR,
@@ -38,11 +52,17 @@ class SettingsDialog(QDialog):
         show_clip_indexes,
         close_to_tray,
         start_with_windows,
+        chip_min_width,
+        chip_max_width,
+        shelf_width_ratio,
         on_show_on_hover,
         on_hide_on_paste,
         on_show_clip_indexes,
         on_close_to_tray,
         on_start_with_windows,
+        on_chip_min_width,
+        on_chip_max_width,
+        on_shelf_width_ratio,
         parent=None,
     ):
         super().__init__(parent)
@@ -74,6 +94,47 @@ class SettingsDialog(QDialog):
             layout, "Start with Windows", start_with_windows, on_start_with_windows
         )
 
+        layout.addSpacing(SETTINGS_WINDOW_SECTION_SPACING)
+        chip_group = QGroupBox("Chip")
+        chip_form = QFormLayout(chip_group)
+        chip_form.setContentsMargins(12, 10, 12, 10)
+        chip_form.setHorizontalSpacing(12)
+        chip_form.setVerticalSpacing(8)
+
+        self.chip_min_width = QSpinBox()
+        self.chip_min_width.setRange(CHIP_WIDTH_MIN_LIMIT, CHIP_WIDTH_MAX_LIMIT)
+        self.chip_min_width.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.chip_min_width.setSuffix(" px")
+        self.chip_min_width.setValue(chip_min_width)
+        self.chip_min_width.valueChanged.connect(on_chip_min_width)
+        chip_form.addRow("Minimum width", self.chip_min_width)
+
+        self.chip_max_width = QSpinBox()
+        self.chip_max_width.setRange(CHIP_WIDTH_MIN_LIMIT, CHIP_WIDTH_MAX_LIMIT)
+        self.chip_max_width.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.chip_max_width.setSuffix(" px")
+        self.chip_max_width.setValue(chip_max_width)
+        self.chip_max_width.valueChanged.connect(on_chip_max_width)
+        chip_form.addRow("Maximum width", self.chip_max_width)
+        layout.addWidget(chip_group)
+
+        layout.addSpacing(SETTINGS_WINDOW_SECTION_SPACING)
+        shelf_group = QGroupBox("Shelf")
+        shelf_form = QFormLayout(shelf_group)
+        shelf_form.setContentsMargins(12, 10, 12, 10)
+        shelf_form.setHorizontalSpacing(12)
+        shelf_form.setVerticalSpacing(8)
+
+        self.shelf_width_ratio = QDoubleSpinBox()
+        self.shelf_width_ratio.setRange(SHELF_WIDTH_RATIO_MIN, SHELF_WIDTH_RATIO_MAX)
+        self.shelf_width_ratio.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self.shelf_width_ratio.setDecimals(2)
+        self.shelf_width_ratio.setSingleStep(0.01)
+        self.shelf_width_ratio.setValue(shelf_width_ratio)
+        self.shelf_width_ratio.valueChanged.connect(on_shelf_width_ratio)
+        shelf_form.addRow("Width ratio", self.shelf_width_ratio)
+        layout.addWidget(shelf_group)
+
         self.setStyleSheet(f"""
             QDialog {{
                 background: {SETTINGS_WINDOW_BACKGROUND_COLOR};
@@ -85,6 +146,19 @@ class SettingsDialog(QDialog):
                 font-size: {SETTINGS_WINDOW_HEADING_FONT_SIZE}px;
                 font-weight: {SETTINGS_WINDOW_HEADING_FONT_WEIGHT};
                 padding-bottom: {SETTINGS_WINDOW_HEADING_BOTTOM_PADDING}px;
+            }}
+            QGroupBox {{
+                color: {SETTINGS_WINDOW_HEADING_COLOR};
+                border: 1px solid {SETTINGS_WINDOW_BUTTON_BORDER_COLOR};
+                border-radius: {SETTINGS_WINDOW_BUTTON_BORDER_RADIUS}px;
+                margin-top: 8px;
+                padding-top: 5px;
+                font-weight: 600;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
             }}
             QCheckBox {{
                 spacing: {SETTINGS_WINDOW_CHECKBOX_SPACING}px;
@@ -110,6 +184,14 @@ class SettingsDialog(QDialog):
                 border-radius: {SETTINGS_WINDOW_BUTTON_BORDER_RADIUS}px;
             }}
             QPushButton:hover {{ background: {SETTINGS_WINDOW_BUTTON_HOVER_COLOR}; }}
+            QSpinBox, QDoubleSpinBox {{
+                min-width: 88px;
+                padding: 4px 6px;
+                color: {SETTINGS_WINDOW_TEXT_COLOR};
+                background: {SETTINGS_WINDOW_BACKGROUND_COLOR};
+                border: 1px solid {SETTINGS_WINDOW_BUTTON_BORDER_COLOR};
+                border-radius: {SETTINGS_WINDOW_BUTTON_BORDER_RADIUS}px;
+            }}
         """)
 
     @staticmethod

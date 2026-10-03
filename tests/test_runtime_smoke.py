@@ -315,6 +315,83 @@ class TestRuntimeSmoke(unittest.TestCase):
         window.tray_icon.hide()
         window.deleteLater()
 
+    def test_settings_dialog_sizing_controls_use_configured_defaults_and_bounds(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+             patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.open_settings()
+        dialog = window._settings_dialog
+        self.assertEqual((dialog.chip_min_width.value(), dialog.chip_min_width.minimum(), dialog.chip_min_width.maximum()), (120, 100, 500))
+        self.assertEqual((dialog.chip_max_width.value(), dialog.chip_max_width.minimum(), dialog.chip_max_width.maximum()), (350, 100, 500))
+        self.assertEqual((dialog.shelf_width_ratio.value(), dialog.shelf_width_ratio.minimum(), dialog.shelf_width_ratio.maximum()), (0.98, 0.50, 0.98))
+        dialog.close()
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_old_sizing_preferences_migrate_to_requested_defaults(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_file = Path(temp_dir) / "settings.json"
+            settings_file.write_text(
+                json.dumps({
+                    "chip_min_width": 119,
+                    "chip_max_width": 199,
+                    "shelf_width_ratio": 0.75,
+                }),
+                encoding="utf-8",
+            )
+            with patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+                 patch("ui.main_window.ClipboardManager"), \
+                 patch("ui.main_window.DragDropHandler"), \
+                 patch("ui.main_window.PasteController"), \
+                 patch("ui.main_window.QTimer"):
+                window = MainWindow()
+
+            self.assertEqual(
+                (window.chip_min_width, window.chip_max_width, window.shelf_width_ratio),
+                (120, 350, 0.98),
+            )
+            migrated_settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            self.assertEqual(migrated_settings["chip_width_defaults_version"], 1)
+            window.tray_icon.hide()
+            window.deleteLater()
+
+    def test_chip_width_and_shelf_ratio_settings_apply_and_persist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_file = Path(temp_dir) / "settings.json"
+            with patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+                 patch("ui.main_window.ClipboardManager"), \
+                 patch("ui.main_window.DragDropHandler"), \
+                 patch("ui.main_window.PasteController"), \
+                 patch("ui.main_window.QTimer"):
+                window = MainWindow()
+                window.add_chip("resizable chip")
+                chip = window.chips_by_content["resizable chip"]
+
+                window.set_chip_min_width(180)
+                self.assertEqual(chip.minimumWidth(), 180)
+                self.assertEqual(window.chip_max_width, 350)
+
+                window.set_chip_max_width(160)
+                self.assertEqual(window.chip_max_width, 160)
+                self.assertEqual(window.chip_min_width, 160)
+                self.assertEqual(chip.minimumWidth(), 160)
+                self.assertEqual(chip.maximumWidth(), 160)
+
+                window.set_shelf_width_ratio(0.75)
+                saved_settings = json.loads(settings_file.read_text(encoding="utf-8"))
+                self.assertEqual(saved_settings["chip_min_width"], 160)
+                self.assertEqual(saved_settings["chip_max_width"], 160)
+                self.assertEqual(saved_settings["shelf_width_ratio"], 0.75)
+
+            window.tray_icon.hide()
+            window.deleteLater()
+            chip.deleteLater()
+
     def test_close_quits_when_close_to_tray_is_disabled(self):
         with patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \
