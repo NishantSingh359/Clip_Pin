@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QGraphicsDropShadowEffect,
+    QSystemTrayIcon,
 )
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
@@ -17,12 +18,17 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QRegion,
+    QIcon,
 )
 import ctypes
 import ctypes.wintypes
 import json
 import sys
 from pathlib import Path
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 from core.clipboard_manager import ClipboardManager
 from core.dragdrop_handler import DragDropHandler
@@ -30,6 +36,7 @@ from core.favicon_service import shutdown_favicon_service
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipWidget
+from ui.settings_dialog import SettingsDialog
 from ui.animations import animate_widget_positions, expand_and_fade_in, fade, parse_color
 from config import (
     APP_NAME,
@@ -132,11 +139,16 @@ class MainWindow(QWidget):
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
+        self.close_to_tray_enabled = True
+        self.start_with_windows_enabled = False
+        self._settings_dialog = None
         self._shadow_margin = max(
             0,
             int(SHELF_SHADOW_BLUR_RADIUS * 2 + max(abs(value) for value in SHELF_SHADOW_OFFSET)),
         )
         self._load_context_menu_settings()
+
+        self._create_tray_icon()
 
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -165,6 +177,7 @@ class MainWindow(QWidget):
         self.move(self.hidden_pos)
 
         self.setup_ui()
+        self.refresh_chip_indexes()
 
         self.auto_hide_timer = QTimer(self)
         self.auto_hide_timer.setSingleShot(True)
@@ -198,10 +211,6 @@ class MainWindow(QWidget):
         self.container = ShelfContainer()
         # Background is drawn in ShelfContainer.paintEvent(), so keep widget background unset
         self.container.setStyleSheet("")
-        self.container.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.container.customContextMenuRequested.connect(self.show_shelf_context_menu)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.show_shelf_context_menu)
 
         container_layout = QVBoxLayout(self.container)
         container_layout.setContentsMargins(*SHELF_PADDING)
@@ -530,7 +539,8 @@ class MainWindow(QWidget):
             self.show_on_hover_enabled = bool(settings.get("show_on_hover_enabled", self.show_on_hover_enabled))
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
-            self.refresh_chip_indexes()
+            self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
+            self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
         except Exception as exc:
             log_exception(f"Failed to load context menu settings: {exc}")
 
@@ -543,6 +553,8 @@ class MainWindow(QWidget):
                         "show_on_hover_enabled": self.show_on_hover_enabled,
                         "hide_on_paste_enabled": self.hide_on_paste_enabled,
                         "clip_indexing_enabled": self.clip_indexing_enabled,
+                        "close_to_tray_enabled": self.close_to_tray_enabled,
+                        "start_with_windows_enabled": self.start_with_windows_enabled,
                     },
                     settings_file,
                     indent=2,
@@ -550,47 +562,103 @@ class MainWindow(QWidget):
         except Exception as exc:
             log_exception(f"Failed to save context menu settings: {exc}")
 
-    def show_shelf_context_menu(self, pos):
-        menu = QMenu(self)
-        hover_action = QAction("Show on Hover", self, checkable=True)
-        hover_action.setChecked(self.show_on_hover_enabled)
-        hide_action = QAction("Hide on Paste", self, checkable=True)
-        hide_action.setChecked(self.hide_on_paste_enabled)
-        index_action = QAction("Show Clip Indexes", self, checkable=True)
-        index_action.setChecked(self.clip_indexing_enabled)
+    def _create_tray_icon(self):
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "app.ico"
+        self.tray_icon = QSystemTrayIcon(QIcon(str(icon_path)), self)
+        self.tray_icon.setToolTip(APP_NAME)
 
-        menu.addAction(hover_action)
-        menu.addAction(hide_action)
-        menu.addAction(index_action)
+        tray_menu = QMenu(self)
+        self.tray_toggle_action = tray_menu.addAction("Open Copy Pin")
+        self.tray_toggle_action.triggered.connect(self.toggle_shelf_from_tray)
+        tray_menu.addAction("Settings", self.open_settings)
+        tray_menu.addSeparator()
+        tray_menu.addAction("Exit", QApplication.quit)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+        self._update_tray_toggle_action()
 
-        menu.setStyleSheet(f'''
-            QMenu {{
-                font-size: 13px;
-                font-weight: 600;
-                background-color: rgba(20, 20, 20, 1);
-                color: rgba(200, 200, 200, 1);
-                border: 0px solid rgba(150, 150, 150, 0.05);
-                border-radius: 0px;
-                padding: 5px 5px;
-            }}
-            QMenu::item {{
-                padding: 5px 5px;
-            }}
-            QMenu::item:selected {{
-                background-color: rgba(40, 40, 40, 0.9);
-                border-radius: 5px;
-            }}
-        ''')
+    def _update_tray_toggle_action(self):
+        if hasattr(self, "tray_toggle_action"):
+            self.tray_toggle_action.setText("Hide Copy Pin" if self.is_open else "Open Copy Pin")
 
-        selected_action = menu.exec(
-            self.mapToGlobal(pos)
+    def toggle_shelf_from_tray(self):
+        if self.is_open:
+            self.hide_shelf(force=True)
+        else:
+            self.show_shelf("cursor")
+        self._update_tray_toggle_action()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self.toggle_shelf_from_tray()
+
+    def open_settings(self):
+        if self._settings_dialog is not None and self._settings_dialog.isVisible():
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+
+        self._settings_dialog = SettingsDialog(
+            show_on_hover=self.show_on_hover_enabled,
+            hide_on_paste=self.hide_on_paste_enabled,
+            show_clip_indexes=self.clip_indexing_enabled,
+            close_to_tray=self.close_to_tray_enabled,
+            start_with_windows=self.start_with_windows_enabled,
+            on_show_on_hover=self.set_show_on_hover_enabled,
+            on_hide_on_paste=self.set_hide_on_paste_enabled,
+            on_show_clip_indexes=self.set_clip_indexing_enabled,
+            on_close_to_tray=self.set_close_to_tray_enabled,
+            on_start_with_windows=self.set_start_with_windows_enabled,
+            parent=None,
         )
-        if selected_action is hover_action:
-            self.set_show_on_hover_enabled(hover_action.isChecked())
-        elif selected_action is hide_action:
-            self.set_hide_on_paste_enabled(hide_action.isChecked())
-        elif selected_action is index_action:
-            self.set_clip_indexing_enabled(index_action.isChecked())
+        self._settings_dialog.setWindowIcon(self.tray_icon.icon())
+        self._settings_dialog.show()
+
+    def set_close_to_tray_enabled(self, enabled):
+        self.close_to_tray_enabled = bool(enabled)
+        self._save_context_menu_settings()
+
+    def set_start_with_windows_enabled(self, enabled):
+        enabled = bool(enabled)
+        try:
+            self._set_windows_startup(enabled)
+        except Exception as exc:
+            log_exception(f"Failed to update Windows startup setting: {exc}")
+            if self._settings_dialog is not None:
+                self._settings_dialog.start_with_windows.setChecked(not enabled)
+            return
+        self.start_with_windows_enabled = enabled
+        self._save_context_menu_settings()
+
+    @staticmethod
+    def _set_windows_startup(enabled):
+        if sys.platform != "win32" or winreg is None:
+            return
+
+        run_key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key_path) as run_key:
+            if enabled:
+                if getattr(sys, "frozen", False):
+                    command = f'"{sys.executable}"'
+                else:
+                    script_path = Path(sys.argv[0]).resolve()
+                    command = f'"{sys.executable}" "{script_path}"'
+                winreg.SetValueEx(run_key, "Copy Pin", 0, winreg.REG_SZ, command)
+            else:
+                try:
+                    winreg.DeleteValue(run_key, "Copy Pin")
+                except FileNotFoundError:
+                    pass
+
+    def closeEvent(self, event):
+        if self.close_to_tray_enabled:
+            event.ignore()
+            self.hide_shelf(force=True)
+            return
+        self.tray_icon.hide()
+        event.accept()
+        QApplication.quit()
 
     @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
@@ -644,6 +712,7 @@ class MainWindow(QWidget):
             self.hide_reset_timer.stop()
 
         self.is_open = True
+        self._update_tray_toggle_action()
 
         # Make sure the shelf is raised above the taskbar/dock layer on Windows
         # before animating it into view.
@@ -659,6 +728,7 @@ class MainWindow(QWidget):
             return
 
         self.is_open = False
+        self._update_tray_toggle_action()
         self._is_hiding = True
         if self.hide_reset_timer.isActive():
             self.hide_reset_timer.stop()

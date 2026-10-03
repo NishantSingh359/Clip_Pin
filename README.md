@@ -67,30 +67,9 @@ This is normal for unsigned desktop applications.
 
 ### Auto Start With Windows
 
-To launch ClipPin automatically when Windows starts:
+Open the Copy Pin system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
 
-1. Press: `Win + R`
-
-2. Type: `shell:startup`
-
-3. Press Enter
-
-4. Create a shortcut of: `ClipPin.exe`
-
-5. Move the `shortcut` and copy `_internal` folder into the Startup folder
-
-Correct setup:
-
-``` text
-C:\Apps\ClipPin
-├── ClipPin.exe
-├── _internal/
-
-Startup folder:
-├── ClipPin Shortcut
-├── _internal/
-
-```
+To keep Copy Pin running after closing its shelf, enable **Keep running when closed** in Settings. Use **Exit** in the tray menu to fully quit the application.
 ---
 
 ### Recommended System

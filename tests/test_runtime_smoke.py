@@ -1,9 +1,11 @@
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
@@ -212,6 +214,126 @@ class TestRuntimeSmoke(unittest.TestCase):
             window = MainWindow()
 
         self.assertIn("border-radius", window.scroll.viewport().styleSheet().lower())
+        window.deleteLater()
+
+    def test_tray_icon_has_open_settings_and_exit_actions(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        self.assertTrue(window.tray_icon.isVisible())
+        self.assertEqual(
+            [action.text() for action in window.tray_icon.contextMenu().actions() if not action.isSeparator()],
+            ["Open Copy Pin", "Settings", "Exit"],
+        )
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_tray_activation_toggles_shelf(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        with patch.object(window, "update_screen_geometry"), \
+             patch.object(window.paste_controller, "foreground_window", return_value=None), \
+             patch.object(window, "animate_to"):
+            window._on_tray_activated(QSystemTrayIcon.Trigger)
+        self.assertTrue(window.is_open)
+        self.assertEqual(window.tray_toggle_action.text(), "Hide Copy Pin")
+
+        with patch.object(window, "animate_to"):
+            window._on_tray_activated(QSystemTrayIcon.Trigger)
+        self.assertFalse(window.is_open)
+        self.assertEqual(window.tray_toggle_action.text(), "Open Copy Pin")
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_close_to_tray_preference_is_persisted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_file = Path(temp_dir) / "settings.json"
+            with patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+                 patch("ui.main_window.ClipboardManager"), \
+                 patch("ui.main_window.DragDropHandler"), \
+                 patch("ui.main_window.PasteController"), \
+                 patch("ui.main_window.QTimer"):
+                window = MainWindow()
+                window.set_close_to_tray_enabled(False)
+                window.set_start_with_windows_enabled(True)
+
+            saved_settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            self.assertFalse(saved_settings["close_to_tray_enabled"])
+            self.assertTrue(saved_settings["start_with_windows_enabled"])
+            window.tray_icon.hide()
+            window.deleteLater()
+
+    def test_close_hides_to_tray_when_enabled(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.close_to_tray_enabled = True
+        event = type("CloseEvent", (), {
+            "ignored": False,
+            "ignore": lambda self: setattr(self, "ignored", True),
+            "accept": lambda self: setattr(self, "ignored", False),
+        })()
+        with patch.object(window, "hide_shelf") as hide_shelf:
+            window.closeEvent(event)
+
+        self.assertTrue(event.ignored)
+        hide_shelf.assert_called_once_with(force=True)
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_settings_dialog_reflects_current_preferences(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.show_on_hover_enabled = False
+        window.hide_on_paste_enabled = False
+        window.clip_indexing_enabled = False
+        window.close_to_tray_enabled = False
+        window.start_with_windows_enabled = True
+        window.open_settings()
+
+        dialog = window._settings_dialog
+        self.assertFalse(dialog.show_on_hover.isChecked())
+        self.assertFalse(dialog.hide_on_paste.isChecked())
+        self.assertFalse(dialog.show_clip_indexes.isChecked())
+        self.assertFalse(dialog.close_to_tray.isChecked())
+        self.assertTrue(dialog.start_with_windows.isChecked())
+        dialog.close()
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_close_quits_when_close_to_tray_is_disabled(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.close_to_tray_enabled = False
+        event = type("CloseEvent", (), {
+            "ignored": False,
+            "ignore": lambda self: setattr(self, "ignored", True),
+            "accept": lambda self: setattr(self, "ignored", False),
+        })()
+        with patch("ui.main_window.QApplication.quit") as quit_app:
+            window.closeEvent(event)
+
+        self.assertFalse(event.ignored)
+        self.assertFalse(window.tray_icon.isVisible())
+        quit_app.assert_called_once()
         window.deleteLater()
 
     def test_pin_reorders_chip_without_collapsing_it(self):
