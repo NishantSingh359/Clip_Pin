@@ -161,6 +161,7 @@ class MainWindow(QWidget):
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
         self.shelf_width_ratio = SHELF_WIDTH_RATIO
+        self._next_chip_number = 1
         self._settings_dialog = None
         self._shadow_margin = max(
             0,
@@ -288,6 +289,7 @@ class MainWindow(QWidget):
 
         self._finish_chip_position_animation()
         chip = ChipWidget(content, self.chip_min_width, self.chip_max_width)
+        self._assign_chip_number(chip)
         chip.paste_requested.connect(self.paste_clip)
         chip.copy_again_requested.connect(self.copy_again_clip)
         chip.delete_requested.connect(self.remove_clip)
@@ -479,21 +481,36 @@ class MainWindow(QWidget):
         return chips
 
     def insert_chip(self, chip):
-        pinned_count = 0
-        for index in range(self.chip_layout.count()):
-            item = self.chip_layout.itemAt(index)
+        insert_at = 0
+        for layout_index in range(self.chip_layout.count()):
+            item = self.chip_layout.itemAt(layout_index)
             if not item:
                 continue
             widget = item.widget()
             if widget is None:
-                continue
+                break
             if widget is getattr(self, "empty_label", None):
                 continue
+
             if getattr(widget, "pinned", False):
-                pinned_count += 1
-            else:
+                insert_at = layout_index + 1
+                continue
+
+            if chip.pinned:
                 break
-        self.chip_layout.insertWidget(pinned_count, chip)
+
+            existing_number = getattr(widget, "clip_index", None)
+            if existing_number is None or chip.clip_index > existing_number:
+                insert_at = layout_index
+                break
+            insert_at = layout_index + 1
+
+        self.chip_layout.insertWidget(insert_at, chip)
+
+    def _assign_chip_number(self, chip):
+        chip.set_clip_index(self._next_chip_number, show_index=self.clip_indexing_enabled)
+        self._next_chip_number += 1
+        self._save_context_menu_settings()
 
     def refresh_chip_indexes(self):
         chips = []
@@ -505,10 +522,11 @@ class MainWindow(QWidget):
             if hasattr(widget, "set_clip_index"):
                 chips.append(widget)
 
-        index = len(chips)
         for chip in chips:
-            chip.set_clip_index(index, show_index=self.clip_indexing_enabled)
-            index -= 1
+            if chip.clip_index is None:
+                self._assign_chip_number(chip)
+            else:
+                chip.set_clip_index(chip.clip_index, show_index=self.clip_indexing_enabled)
 
     @safe_slot("Failed to paste clipboard chip")
     def paste_clip(self, content):
@@ -1080,6 +1098,14 @@ class MainWindow(QWidget):
             self.clipboard_manager.close()
         except Exception:
             log_exception("Failed to shut down clipboard manager")
+        try:
+            self.clipboard_manager.get_db().clear()
+        except Exception:
+            log_exception("Failed to clear clipboard history on shutdown")
+        try:
+            self.clipboard_manager.image_store.clear_thumbnails()
+        except Exception:
+            log_exception("Failed to clear stored clipboard images on shutdown")
         try:
             shutdown_favicon_service()
         except Exception:

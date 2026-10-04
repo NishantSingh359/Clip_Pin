@@ -49,6 +49,22 @@ class ImageStore:
                     pass
         return deleted
 
+    def clear_thumbnails(self) -> int:
+        """Delete all image copies managed by this app's thumbnail store."""
+        if not self.thumbnail_dir.exists():
+            return 0
+
+        deleted = 0
+        for path in self.thumbnail_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError:
+                log_exception(f"Failed to delete stored clipboard image: {path}")
+        return deleted
+
     def save_image(self, image_data, prefix="image"):
 
         image = self._as_image(image_data)

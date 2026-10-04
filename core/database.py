@@ -376,6 +376,7 @@ class ClipboardDatabase:
         """
         def operation(conn):
             cursor = conn.execute("DELETE FROM clips")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name = 'clips'")
             return cursor.rowcount
 
         return self._write_with_retry(operation)

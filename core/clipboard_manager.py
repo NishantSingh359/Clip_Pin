@@ -209,4 +209,4 @@ class ClipboardManager(QObject):
             self.clipboard.dataChanged.disconnect(self.on_data_changed)
         except (RuntimeError, TypeError):
             pass
-        self._image_executor.shutdown(wait=False, cancel_futures=True)
+        self._image_executor.shutdown(wait=True, cancel_futures=True)
