@@ -35,7 +35,7 @@ from core.dragdrop_handler import DragDropHandler
 from core.favicon_service import shutdown_favicon_service
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
-from ui.chip_widget import ChipWidget
+from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
 from ui.animations import animate_widget_positions, expand_and_fade_in, fade, parse_color
 from config import (
@@ -57,6 +57,7 @@ from config import (
     MAX_CHIPS,
     MOUSE_POLL_MS,
     MOTION_ENABLED,
+    CHIP_CONTEXT_MENU_FADE_OUT_MS,
     MOTION_SHELF_MS,
     CHIP_LAYOUT_ANIMATION_MS,
     SHELF_CHIP_REVEAL_ENABLED,
@@ -750,6 +751,22 @@ class MainWindow(QWidget):
         event.accept()
         QApplication.quit()
 
+    def _cursor_over_chip_context_menu(self, cursor):
+        popup = self._active_chip_context_menu()
+        if popup is None or not popup.frameGeometry().contains(cursor):
+            return False
+
+        return True
+
+    def _active_chip_context_menu(self):
+        popup = QApplication.activePopupWidget()
+        if not isinstance(popup, ChipContextMenu):
+            return None
+        parent = popup.parentWidget()
+        while parent is not None and parent is not self:
+            parent = parent.parentWidget()
+        return popup if parent is self else None
+
     @safe_slot("Failed to check mouse position")
     def check_mouse_position(self):
         is_dragging = False
@@ -760,12 +777,17 @@ class MainWindow(QWidget):
 
         if self.is_shelf_pinned or self._is_hiding:
             return
+
+        cursor = QCursor.pos()
+        if self._cursor_over_chip_context_menu(cursor):
+            if self.auto_hide_timer.isActive():
+                self.auto_hide_timer.stop()
+            return
             
         if not self.show_on_hover_enabled and not is_dragging and not self.is_open:
             return
 
         self.update_screen_geometry("cursor")
-        cursor = QCursor.pos()
         mouse_y = cursor.y()
 
         if self.is_open:
@@ -816,6 +838,10 @@ class MainWindow(QWidget):
     def hide_shelf(self, force=False):
         if self.is_shelf_pinned and not force:
             return
+
+        popup = self._active_chip_context_menu()
+        if popup is not None:
+            fade(popup, 1.0, 0.0, CHIP_CONTEXT_MENU_FADE_OUT_MS, finished=popup.close)
 
         self.is_open = False
         self._update_tray_toggle_action()

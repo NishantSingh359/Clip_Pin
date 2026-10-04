@@ -4,13 +4,13 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
-from ui.chip_widget import ChipWidget
+from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.main_window import MainWindow
 
 
@@ -42,6 +42,73 @@ class FakeFaviconService:
 
 
 class TestRuntimeSmoke(unittest.TestCase):
+    def test_cursor_over_chip_context_menu_prevents_shelf_autohide(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        menu = ChipContextMenu(window)
+        menu.setGeometry(QRect(500, 80, 50, 140))
+        window.is_open = True
+        window.auto_hide_timer.start()
+
+        with patch("ui.main_window.QApplication.activePopupWidget", return_value=menu), \
+             patch("ui.main_window.QCursor.pos", return_value=QPoint(520, 120)), \
+             patch.object(window, "update_screen_geometry"):
+            window.check_mouse_position()
+
+        window.auto_hide_timer.stop.assert_called()
+        menu.close()
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_hiding_shelf_closes_its_chip_context_menu(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        menu = ChipContextMenu(window)
+        menu.show()
+        window.is_shelf_pinned = False
+        with patch("ui.main_window.QApplication.activePopupWidget", return_value=menu), \
+               patch("ui.main_window.fade", side_effect=lambda widget, start, end, duration, finished: finished()), \
+             patch.object(window, "animate_to"):
+            window.hide_shelf()
+
+        self.assertFalse(menu.isVisible())
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_hiding_shelf_fades_chip_context_menu_before_close(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        menu = ChipContextMenu(window)
+        menu.show()
+        with patch("ui.main_window.QApplication.activePopupWidget", return_value=menu), \
+             patch("ui.main_window.fade", side_effect=lambda widget, start, end, duration, finished: finished()) as fade_popup, \
+             patch.object(window, "animate_to"):
+            window.hide_shelf()
+
+        fade_popup.assert_called_once()
+        self.assertEqual(fade_popup.call_args.args[:3], (menu, 1.0, 0.0))
+        from config import CHIP_CONTEXT_MENU_FADE_OUT_MS
+
+        self.assertEqual(fade_popup.call_args.args[3], CHIP_CONTEXT_MENU_FADE_OUT_MS)
+        close_callback = fade_popup.call_args.kwargs["finished"]
+        self.assertEqual(close_callback.__self__, menu)
+        self.assertTrue(callable(close_callback))
+        menu.close()
+        window.tray_icon.hide()
+        window.deleteLater()
+
     def test_hover_does_not_use_dock_area_as_top_edge(self):
         class FakeGeometry:
             def __init__(self, left, top, width, height):
