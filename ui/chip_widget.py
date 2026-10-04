@@ -4,7 +4,7 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QByteArray, Property, Qt, QUrl, Signal, QPoint, QSize, QRectF, QMimeData, QBuffer, QIODevice, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import QByteArray, Qt, QUrl, Signal, QPoint, QSize, QRectF, QMimeData, QBuffer, QIODevice
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -43,7 +43,6 @@ from config import (
     CHIP_HOVER_BACKGROUND,
     CHIP_PINNED_BACKGROUND,
     CHIP_PADDING,
-    CHIP_PRESSED_BACKGROUND,
     CHIP_SPACING,
     CHIP_TEXT_COLOR,
     CHIP_TEXT_FONT_SIZE,
@@ -84,11 +83,6 @@ from config import (
     THUMBNAIL_SHADOW_BLUR_RADIUS,
     THUMBNAIL_SHADOW_OFFSET,
     THUMBNAIL_SHADOW_COLOR,
-    MOTION_ENABLED,
-    MOTION_BASE_MS,
-    MOTION_FAST_MS,
-    MOTION_HOVER_MS,
-    CHIP_HOVER_COLOR_DURATION_MS,
 )
 from core.favicon_service import get_favicon_service
 from utils.app_logging import log_exception, safe_slot
@@ -190,8 +184,6 @@ class ChipWidget(QWidget):
         self.pinned = False
         self.network = None
         self._destroyed = False
-        self._background_color = parse_color(CHIP_DEFAULT_BACKGROUND)
-        self._background_animation = None
         self._is_hovered = False
         self._is_deleting = False
         self._drag_start_position = None
@@ -219,17 +211,8 @@ class ChipWidget(QWidget):
         if self.kind == "LINK":
             self.load_favicon()
 
-    def get_background_color(self):
-        return self._background_color
-
     def mark_destroyed(self):
         self._destroyed = True
-
-    def set_background_color(self, color):
-        self._background_color = parse_color(color)
-        self.apply_style()
-
-    backgroundColor = Property(QColor, get_background_color, set_background_color)
 
     def sizeHint(self):
         return QSize(self._base_width, self._base_height)
@@ -296,40 +279,20 @@ class ChipWidget(QWidget):
 
     def apply_style(self):
         border_color = CHIP_PINNED_BORDER_COLOR if self.pinned else (CHIP_HOVER_BORDER_COLOR if self._is_hovered else CHIP_BORDER_COLOR)
+        background_color = (
+            CHIP_PINNED_BACKGROUND
+            if self.pinned
+            else CHIP_HOVER_BACKGROUND
+            if self._is_hovered
+            else CHIP_DEFAULT_BACKGROUND
+        )
         self.setStyleSheet(f"""
             #chip {{
-                background-color: {color_to_rgba(self._background_color)};
+                background-color: {color_to_rgba(background_color)};
                 border: {CHIP_BORDER_WIDTH}px solid {border_color};
                 border-radius: {CHIP_BORDER_RADIUS}px;
             }}
         """)
-
-    def state_background(self):
-        if self.pinned:
-            return parse_color(CHIP_PINNED_BACKGROUND)
-        if self._is_hovered:
-            return parse_color(CHIP_HOVER_BACKGROUND)
-        return parse_color(CHIP_DEFAULT_BACKGROUND)
-
-    def animate_background_to(self, color, duration=MOTION_HOVER_MS):
-        target_color = parse_color(color)
-        if self._background_color == target_color:
-            return
-
-        if self._background_animation is not None:
-            self._background_animation.stop()
-
-        if not MOTION_ENABLED or CHIP_HOVER_COLOR_DURATION_MS <= 0:
-            self.set_background_color(target_color)
-            return
-
-        animation = QPropertyAnimation(self, b"backgroundColor", self)
-        animation.setDuration(CHIP_HOVER_COLOR_DURATION_MS)
-        animation.setStartValue(self._background_color)
-        animation.setEndValue(target_color)
-        animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._background_animation = animation
-        animation.start()
 
     def set_hovered(self, hovered):
         hovered = bool(hovered)
@@ -337,26 +300,7 @@ class ChipWidget(QWidget):
             return
         self._is_hovered = hovered
         if not self._is_deleting:
-            self.animate_background_to(self.state_background(), MOTION_HOVER_MS)
-
-    def animate_entry(self, duration=MOTION_BASE_MS):
-        # Animations removed: immediately set to base width and show
-        self.setMinimumWidth(self._base_width)
-        self.setMaximumWidth(self._base_width)
-        self.show()
-
-    def animate_delete(self, finished=None):
-        # Animations removed: immediately call finished (or delete)
-        if self._is_deleting:
-            return
-        self._is_deleting = True
-        if finished:
-            finished()
-        else:
-            self.deleteLater()
-
-    def animate_press(self):
-        self.animate_background_to(CHIP_PRESSED_BACKGROUND, MOTION_FAST_MS)
+            self.apply_style()
 
     def set_clip_index(self, index, show_index=True):
         self.clip_index = index
@@ -734,7 +678,6 @@ class ChipWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.animate_press()
             self._drag_start_position = event.pos()
             self._dragging = False
         super().mousePressEvent(event)
@@ -755,21 +698,16 @@ class ChipWidget(QWidget):
         if event.button() == Qt.LeftButton:
             if not self._dragging and not self._is_deleting:
                 self.paste_requested.emit(self.content)
-            self.animate_background_to(self.state_background(), MOTION_FAST_MS)
             self._drag_start_position = None
             self._dragging = False
         super().mouseReleaseEvent(event)
 
     def enterEvent(self, event):
-        self._is_hovered = True
-        if not self._is_deleting:
-            self.animate_background_to(self.state_background(), MOTION_HOVER_MS)
+        self.set_hovered(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._is_hovered = False
-        if not self._is_deleting:
-            self.animate_background_to(self.state_background(), MOTION_HOVER_MS)
+        self.set_hovered(False)
         super().leaveEvent(event)
 
     def show_context_menu(self, position):
@@ -839,7 +777,7 @@ class ChipWidget(QWidget):
 
         def toggle_pin():
             self.pinned = not self.pinned
-            self.animate_background_to(self.state_background(), MOTION_BASE_MS)
+            self.apply_style()
             self.pin_requested.emit(self.content)
 
         pin_action = add_icon_action(make_menu_icon(pin_icon, normal_icon_color), toggle_pin)

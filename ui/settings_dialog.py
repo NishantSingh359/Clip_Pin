@@ -79,16 +79,16 @@ class SettingsDialog(QDialog):
         layout.addWidget(heading)
 
         self.show_on_hover = self._add_checkbox(
-            layout, "Show shelf on hover", show_on_hover, on_show_on_hover
+            layout, "Show shelf on Hover", show_on_hover, on_show_on_hover
         )
         self.hide_on_paste = self._add_checkbox(
-            layout, "Hide shelf after paste", hide_on_paste, on_hide_on_paste
+            layout, "Hide Shelf After Paste", hide_on_paste, on_hide_on_paste
         )
         self.show_clip_indexes = self._add_checkbox(
-            layout, "Show clip indexes", show_clip_indexes, on_show_clip_indexes
+            layout, "Show Clip Indexes", show_clip_indexes, on_show_clip_indexes
         )
         self.close_to_tray = self._add_checkbox(
-            layout, "Keep running when closed", close_to_tray, on_close_to_tray
+            layout, "Keep Running When Closed", close_to_tray, on_close_to_tray
         )
         self.start_with_windows = self._add_checkbox(
             layout, "Start with Windows", start_with_windows, on_start_with_windows
