@@ -176,6 +176,7 @@ class ChipWidget(QWidget):
     delete_requested = Signal(str)
     pin_requested = Signal(str)
     clear_all_requested = Signal()
+    context_action_triggered = Signal()
     favicon_loaded = Signal(bytes)
 
     def __init__(self, content, min_width=CHIP_MIN_WIDTH, max_width=CHIP_MAX_WIDTH):
@@ -825,7 +826,13 @@ class ChipWidget(QWidget):
                 }}
             ''')
             action.setDefaultWidget(button)
-            action.triggered.connect(lambda checked=False: (callback(), menu.close()))
+
+            def trigger_action(checked=False):
+                self.context_action_triggered.emit()
+                callback()
+                menu.close()
+
+            action.triggered.connect(trigger_action)
             button.clicked.connect(action.trigger)
             menu.addAction(action)
             return action

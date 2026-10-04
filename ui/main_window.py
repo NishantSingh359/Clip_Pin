@@ -205,6 +205,7 @@ class MainWindow(QWidget):
         self.auto_hide_timer = QTimer(self)
         self.auto_hide_timer.setSingleShot(True)
         self.auto_hide_timer.timeout.connect(self.hide_shelf)
+        self._auto_hide_waiting_for_reentry = False
 
         self.hide_reset_timer = QTimer(self)
         self.hide_reset_timer.setSingleShot(True)
@@ -295,6 +296,7 @@ class MainWindow(QWidget):
         chip.delete_requested.connect(self.remove_clip)
         chip.pin_requested.connect(self.pin_clip)
         chip.clear_all_requested.connect(self.clear_unpinned_clips)
+        chip.context_action_triggered.connect(self.keep_shelf_open_after_context_action)
         self.chips_by_content[content] = chip
         self.update_empty_state()
         self.insert_chip(chip)
@@ -605,8 +607,6 @@ class MainWindow(QWidget):
         self.add_clips(items)
         self._set_clipboard_for_drop(items)
         event.acceptProposedAction()
-        
-        self.hide_shelf()
 
     def _set_clipboard_for_drop(self, items):
         if not items:
@@ -899,6 +899,14 @@ class MainWindow(QWidget):
                 8,
                 HIDE_DISTANCE,
             )
+            if self._auto_hide_waiting_for_reentry:
+                if active_area.contains(cursor):
+                    self._auto_hide_waiting_for_reentry = False
+                else:
+                    if self.auto_hide_timer.isActive():
+                        self.auto_hide_timer.stop()
+                    return
+
             if not active_area.contains(cursor):
                 if not self.auto_hide_timer.isActive():
                     self.auto_hide_timer.start(SHELF_AUTO_HIDE_DELAY)
@@ -916,10 +924,16 @@ class MainWindow(QWidget):
         if is_over_top_edge:
             self.show_shelf("cursor")
 
+    def keep_shelf_open_after_context_action(self):
+        self._auto_hide_waiting_for_reentry = True
+        if self.auto_hide_timer.isActive():
+            self.auto_hide_timer.stop()
+
     def show_shelf(self, monitor_hint="cursor"):
         self.update_screen_geometry(monitor_hint)
         self.last_target_window = self.paste_controller.foreground_window()
         self._is_hiding = False
+        self._auto_hide_waiting_for_reentry = False
         if self.hide_reset_timer.isActive():
             self.hide_reset_timer.stop()
 
