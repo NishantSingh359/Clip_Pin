@@ -334,43 +334,23 @@ class MainWindow(QWidget):
 
         self._finish_chip_position_animation()
         start_positions = {chip: chip.pos() for chip in self.chip_widgets()}
-        fade_start_opacities = {}
         for chip in chips:
             chip._is_deleting = True
             chip.setEnabled(False)
             chip.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            effect = chip.graphicsEffect()
-            fade_start_opacities[chip] = (
-                effect.opacity()
-                if effect is not None and hasattr(effect, "opacity")
-                else 1.0
-            )
             entry_animation = getattr(chip, "_entry_fade_animation", None)
             if entry_animation is not None:
                 entry_animation.stop()
                 chip._entry_fade_animation = None
+            chip.hide()
+            chip.setGraphicsEffect(None)
             self.chip_layout.removeWidget(chip)
+            chip.deleteLater()
 
         self.chip_layout.activate()
         self.update_empty_state()
         self.refresh_chip_indexes()
-
-        for chip in chips:
-            fade(
-                chip,
-                fade_start_opacities[chip],
-                0.0,
-                CHIP_LAYOUT_ANIMATION_MS,
-                finished=lambda chip=chip: self._finish_chip_removal(chip),
-            )
-
         self._animate_chip_layout(start_positions, CHIP_LAYOUT_ANIMATION_MS)
-
-    @staticmethod
-    def _finish_chip_removal(chip):
-        chip.hide()
-        chip.setGraphicsEffect(None)
-        chip.deleteLater()
 
     @staticmethod
     def _finish_chip_fade_in(chip):
