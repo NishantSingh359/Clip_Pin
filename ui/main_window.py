@@ -7,10 +7,20 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QSystemTrayIcon,
 )
 
-from PySide6.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import (
+    Qt,
+    QTimer,
+    QPoint,
+    QPropertyAnimation,
+    QParallelAnimationGroup,
+    QSequentialAnimationGroup,
+    QPauseAnimation,
+    QEasingCurve,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -37,7 +47,7 @@ from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
-from ui.animations import animate_widget_positions, expand_and_fade_in, fade, parse_color
+from ui.animations import expand_and_fade_in, fade, parse_color
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
@@ -144,6 +154,8 @@ class MainWindow(QWidget):
         self._is_hiding = False
         self._hotkey_was_down = False
         self._screen_geometry_cache_key = None
+        self._chip_position_animation_group = None
+        self._chip_position_targets = {}
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
@@ -276,6 +288,7 @@ class MainWindow(QWidget):
         if content in self.chips_by_content:
             return
 
+        self._finish_chip_position_animation()
         chip = ChipWidget(content, self.chip_min_width, self.chip_max_width)
         chip.paste_requested.connect(self.paste_clip)
         chip.copy_again_requested.connect(self.copy_again_clip)
@@ -309,6 +322,7 @@ class MainWindow(QWidget):
         if getattr(chip, "_is_deleting", False):
             return
         chip._is_deleting = True
+        self._finish_chip_position_animation()
         start_positions = {
             other: other.pos()
             for other in self.chip_widgets()
@@ -322,14 +336,7 @@ class MainWindow(QWidget):
             chip.deleteLater()
 
         fade(chip, 1.0, 0.0, CHIP_LAYOUT_ANIMATION_MS, finished=finish_removal)
-        QTimer.singleShot(
-            0,
-            lambda: animate_widget_positions(
-                self.chip_widgets(),
-                start_positions,
-                CHIP_LAYOUT_ANIMATION_MS,
-            ),
-        )
+        self._animate_chip_layout(start_positions, CHIP_LAYOUT_ANIMATION_MS)
 
     def update_empty_state(self):
         if hasattr(self, "empty_label"):
@@ -361,9 +368,10 @@ class MainWindow(QWidget):
     @safe_slot("Failed to pin clipboard chip")
     def pin_clip(self, content):
         chip = self.chips_by_content.get(content)
-        if not chip or getattr(chip, "_is_reordering", False) or getattr(chip, "_is_deleting", False):
+        if not chip or getattr(chip, "_is_deleting", False):
             return
 
+        self._finish_chip_position_animation()
         chip._is_reordering = True
         chips = self.chip_widgets()
         start_positions = {item: item.pos() for item in chips}
@@ -371,12 +379,106 @@ class MainWindow(QWidget):
         self.insert_chip(chip)
         self.refresh_chip_indexes()
 
-        def animate_reorder():
-            current_chips = self.chip_widgets()
-            animate_widget_positions(current_chips, start_positions, CHIP_LAYOUT_ANIMATION_MS)
-            QTimer.singleShot(CHIP_LAYOUT_ANIMATION_MS, lambda: setattr(chip, "_is_reordering", False))
+        self._animate_chip_layout(
+            start_positions,
+            CHIP_LAYOUT_ANIMATION_MS,
+            finished=lambda: setattr(chip, "_is_reordering", False),
+        )
 
-        QTimer.singleShot(0, animate_reorder)
+    def _finish_chip_position_animation(self):
+        animation_group = self._chip_position_animation_group
+        if animation_group is not None:
+            animation_group.stop()
+            self._chip_position_animation_group = None
+        for chip, target in self._chip_position_targets.items():
+            chip.setGraphicsEffect(None)
+            chip.move(target)
+        self._chip_position_targets = {}
+        self.chip_layout.setEnabled(True)
+        self.chip_layout.activate()
+        self._clear_chip_reordering_flags()
+
+    def _clear_chip_reordering_flags(self):
+        for chip in self.chip_widgets():
+            chip._is_reordering = False
+
+    def _animate_chip_layout(self, start_positions, duration, finished=None):
+        self.chip_layout.activate()
+        target_positions = {
+            chip: chip.pos()
+            for chip in self.chip_widgets()
+            if chip in start_positions
+        }
+        moving_chips = [
+            chip
+            for chip, target in target_positions.items()
+            if start_positions[chip] != target
+        ]
+
+        if not MOTION_ENABLED or duration <= 0 or not moving_chips:
+            self.chip_layout.setEnabled(True)
+            self.chip_layout.activate()
+            self._clear_chip_reordering_flags()
+            if finished:
+                finished()
+            return
+
+        fade_out_group = QParallelAnimationGroup()
+        fade_in_group = QParallelAnimationGroup()
+        opacity_effects = {}
+        fade_out_duration = max(1, duration // 3)
+        for chip in moving_chips:
+            effect = chip.graphicsEffect()
+            if not isinstance(effect, QGraphicsOpacityEffect):
+                effect = QGraphicsOpacityEffect(chip)
+                chip.setGraphicsEffect(effect)
+            effect.setOpacity(1.0)
+            opacity_effects[chip] = effect
+            chip.move(start_positions[chip])
+            fade_out = QPropertyAnimation(effect, b"opacity", fade_out_group)
+            fade_out.setDuration(fade_out_duration)
+            fade_out.setStartValue(1.0)
+            fade_out.setEndValue(0.0)
+            fade_out.setEasingCurve(QEasingCurve.InQuad)
+            fade_out_group.addAnimation(fade_out)
+
+            fade_in = QPropertyAnimation(effect, b"opacity", fade_in_group)
+            fade_in.setDuration(max(1, duration - fade_out_duration))
+            fade_in.setStartValue(0.0)
+            fade_in.setEndValue(1.0)
+            fade_in.setEasingCurve(QEasingCurve.OutQuad)
+            fade_in_group.addAnimation(fade_in)
+
+        animation_group = QSequentialAnimationGroup(self)
+        animation_group.addAnimation(fade_out_group)
+
+        def reflow_chips():
+            for chip, target in target_positions.items():
+                chip.move(target)
+            self.chip_layout.setEnabled(True)
+            self.chip_layout.activate()
+
+        reflow_pause = QPauseAnimation(1, animation_group)
+        reflow_pause.finished.connect(reflow_chips)
+        animation_group.addAnimation(reflow_pause)
+        animation_group.addAnimation(fade_in_group)
+
+        def finish_transition():
+            for chip in moving_chips:
+                chip.setGraphicsEffect(None)
+            self.chip_layout.setEnabled(True)
+            self.chip_layout.activate()
+            self._chip_position_animation_group = None
+            self._chip_position_targets = {}
+            self._clear_chip_reordering_flags()
+            if finished:
+                finished()
+
+        animation_group.finished.connect(finish_transition)
+        self._chip_position_animation_group = animation_group
+        self._chip_position_targets = target_positions
+        self.chip_layout.setEnabled(False)
+        animation_group.start()
 
     def chip_widgets(self):
         chips = []
@@ -688,8 +790,6 @@ class MainWindow(QWidget):
         for chip in self.chips_by_content.values():
             chip.min_width = self.chip_min_width
             chip.max_width = self.chip_max_width
-            chip.setMinimumWidth(self.chip_min_width)
-            chip.setMaximumWidth(self.chip_max_width)
             chip.update_label()
         self._save_context_menu_settings()
 

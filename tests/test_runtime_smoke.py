@@ -6,12 +6,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+from PySide6.QtTest import QTest
 
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.main_window import MainWindow
+from config import CHIP_LAYOUT_ANIMATION_MS
 
 
 app = QApplication.instance() or QApplication([])
@@ -440,14 +442,16 @@ class TestRuntimeSmoke(unittest.TestCase):
                 chip = window.chips_by_content["resizable chip"]
 
                 window.set_chip_min_width(180)
-                self.assertEqual(chip.minimumWidth(), 180)
+                self.assertEqual(chip.min_width, 180)
+                self.assertGreaterEqual(chip.width(), 180)
                 self.assertEqual(window.chip_max_width, 350)
 
                 window.set_chip_max_width(160)
                 self.assertEqual(window.chip_max_width, 160)
                 self.assertEqual(window.chip_min_width, 160)
-                self.assertEqual(chip.minimumWidth(), 160)
-                self.assertEqual(chip.maximumWidth(), 160)
+                self.assertEqual(chip.min_width, 160)
+                self.assertEqual(chip.max_width, 160)
+                self.assertEqual(chip.width(), 160)
 
                 window.set_shelf_width_ratio(0.75)
                 saved_settings = json.loads(settings_file.read_text(encoding="utf-8"))
@@ -501,6 +505,47 @@ class TestRuntimeSmoke(unittest.TestCase):
 
         self.assertIs(window.chip_layout.itemAt(0).widget(), second)
         self.assertGreater(second.width(), 0)
+        window.deleteLater()
+
+    def test_pin_then_unpin_reorders_chip_without_overlap(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.show()
+        window.add_chip("older item")
+        window.add_chip("newer item")
+        app.processEvents()
+        older = window.chips_by_content["older item"]
+        newer = window.chips_by_content["newer item"]
+
+        def wait_for_transition():
+            if window._chip_position_animation_group is not None:
+                QTest.qWait(window._chip_position_animation_group.duration() + 80)
+            app.processEvents()
+
+        wait_for_transition()
+
+        older.pinned = True
+        window.pin_clip(older.content)
+        self.assertIs(window.chip_layout.itemAt(0).widget(), older)
+        wait_for_transition()
+
+        newer.pinned = True
+        window.pin_clip(newer.content)
+        wait_for_transition()
+
+        older.pinned = False
+        window.pin_clip(older.content)
+        self.assertIs(window.chip_layout.itemAt(0).widget(), newer)
+        wait_for_transition()
+
+        self.assertFalse(older._is_reordering)
+        self.assertGreater(older.width(), 0)
+        self.assertGreater(newer.width(), 0)
+        self.assertFalse(older.geometry().intersects(newer.geometry()))
         window.deleteLater()
 
     def test_removing_chip_shifts_next_chip_without_width_collapse(self):

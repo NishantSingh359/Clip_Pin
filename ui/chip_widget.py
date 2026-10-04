@@ -230,6 +230,9 @@ class ChipWidget(QWidget):
 
     backgroundColor = Property(QColor, get_background_color, set_background_color)
 
+    def sizeHint(self):
+        return QSize(self._base_width, self._base_height)
+
     def setup_ui(self):
         self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -380,16 +383,6 @@ class ChipWidget(QWidget):
     def update_label(self):
         text = self.display_text()
         metrics = QFontMetrics(self.title.font())
-        index_width = self.index_label.sizeHint().width() + CHIP_SPACING if self.index_label.isVisible() else 0
-        if self.kind == "LINK":
-            title_width = self.max_width - 68 - index_width
-        elif self.kind == "IMG":
-            title_width = self.max_width - 34 - index_width
-        else:
-            title_width = self.max_width - 42 - index_width
-        title_width = max(36, title_width)
-        self.title.setText(metrics.elidedText(text, Qt.ElideRight, title_width))
-
         if self.kind == "IMG":
             self.icon.show()
             self.set_image_thumb()
@@ -407,12 +400,24 @@ class ChipWidget(QWidget):
         else:
             self.icon.hide()
 
-        self.adjustSize()
-        width = max(self.min_width, min(self.sizeHint().width(), self.max_width))
+        visible_widgets = [
+            widget for widget in (self.index_label, self.icon, self.title, self.open_icon)
+            if not widget.isHidden()
+        ]
+        margins = self.layout.contentsMargins()
+        fixed_width = margins.left() + margins.right() + 2 * CHIP_BORDER_WIDTH
+        fixed_width += CHIP_SPACING * max(0, len(visible_widgets) - 1)
+        fixed_width += sum(
+            widget.sizeHint().width()
+            for widget in visible_widgets
+            if widget is not self.title
+        )
+        natural_width = fixed_width + metrics.horizontalAdvance(text)
+        width = max(self.min_width, min(natural_width, self.max_width))
+        title_width = max(0, width - fixed_width)
+        self.title.setText(metrics.elidedText(text, Qt.ElideRight, title_width))
         self._base_width = width
-        self.setMinimumWidth(self.min_width)
-        self.setMaximumWidth(self.max_width)
-        self.resize(width, self._base_height)
+        self.setFixedWidth(width)
         self.setFixedHeight(self._base_height)
 
     def display_text(self):
