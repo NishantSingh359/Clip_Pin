@@ -20,34 +20,13 @@ https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
 
 ## ClipFlow Installation Guide (Windows)
 
-### Download ClipFlow
+### Install ClipFlow
 
-1. Go to: Releases → Latest Release
-2. Download: `ClipFlow-v1.0.zip`
+1. Go to the latest GitHub Release.
+2. Download and run `ClipFlow-Setup-1.0.0.exe`.
+3. Follow the installer and launch ClipFlow from the Start menu or optional desktop shortcut.
 
----
-
-### Extract The ZIP
-
-1. Right click: `ClipFlow-v1.0.zip`
-2. Click: Extract All
-3. Extract to any permanent location.
-
-After extraction you should see:
-
-``` text
-ClipFlow/
-├── ClipFlow.exe
-├── _internal/
-```
-
----
-
-### Run ClipFlow
-
-Double click: `ClipFlow.exe`
-
-The app should now launch.
+The installer places the application and its required runtime files in the per-user program folder. You do not need to move files into the Windows Startup folder yourself.
 
 ---
 
@@ -70,6 +49,18 @@ This is normal for unsigned desktop applications.
 Open the ClipFlow system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
 
 To keep ClipFlow running after closing its shelf, enable **Keep running when closed** in Settings. Use **Exit** in the tray menu to fully quit the application.
+---
+
+### Build The Windows Installer
+
+Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), activate the project virtual environment, then run:
+
+```powershell
+.\build_installer.ps1
+```
+
+The script builds the PyInstaller application bundle and then creates `dist\installer\ClipFlow-Setup-1.0.0.exe`. The installed app includes its `_internal` runtime folder; the installer manages these files and creates the application shortcuts.
+
 ---
 
 ### Recommended System
