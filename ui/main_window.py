@@ -927,9 +927,9 @@ class MainWindow(QWidget):
                 else:
                     script_path = Path(__file__).resolve().parents[1] / "main.py"
                     command = f'"{sys.executable}" "{script_path}"'
-                winreg.SetValueEx(run_key, "ClipFlow", 0, winreg.REG_SZ, command)
-            for value_name in ("Copy Pin", "ClipFlow"):
-                if enabled and value_name == "ClipFlow":
+                winreg.SetValueEx(run_key, "DockPaste", 0, winreg.REG_SZ, command)
+            for value_name in ("Copy Pin", "ClipFlow", "DockPaste"):
+                if enabled and value_name == "DockPaste":
                     continue
                 try:
                     winreg.DeleteValue(run_key, value_name)

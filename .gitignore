@@ -9,6 +9,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!DockPaste.spec
 
 # Database
 data/clips.db

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 
-APP_NAME = "ClipFlow"
+APP_NAME = "DockPaste"
 APP_STORAGE_NAME = "Copy Pin"  # Preserve existing user data and settings path.
 BASE_DIR = Path(__file__).resolve().parent
 APP_STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or BASE_DIR) / APP_STORAGE_NAME
@@ -160,7 +160,7 @@ THUMBNAIL_SHADOW_COLOR = "rgba(0, 0, 0, 0.45)"
 # ===============
 # SETTINGS WINDOW
 
-SETTINGS_WINDOW_TITLE = "ClipFlow Settings"
+SETTINGS_WINDOW_TITLE = "DockPaste Settings"
 SETTINGS_WINDOW_MIN_WIDTH = 320
 SETTINGS_WINDOW_BACKGROUND_COLOR = "#202124"
 SETTINGS_WINDOW_TEXT_COLOR = "#c0c0c0"

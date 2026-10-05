@@ -295,7 +295,7 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertTrue(window.tray_icon.isVisible())
         self.assertEqual(
             [action.text() for action in window.tray_icon.contextMenu().actions() if not action.isSeparator()],
-            ["Open Copy Pin", "Settings", "Exit"],
+            ["Open DockPaste", "Settings", "Exit"],
         )
         window.tray_icon.hide()
         window.deleteLater()
@@ -312,12 +312,12 @@ class TestRuntimeSmoke(unittest.TestCase):
              patch.object(window, "animate_to"):
             window._on_tray_activated(QSystemTrayIcon.Trigger)
         self.assertTrue(window.is_open)
-        self.assertEqual(window.tray_toggle_action.text(), "Hide Copy Pin")
+        self.assertEqual(window.tray_toggle_action.text(), "Hide DockPaste")
 
         with patch.object(window, "animate_to"):
             window._on_tray_activated(QSystemTrayIcon.Trigger)
         self.assertFalse(window.is_open)
-        self.assertEqual(window.tray_toggle_action.text(), "Open Copy Pin")
+        self.assertEqual(window.tray_toggle_action.text(), "Open DockPaste")
         window.tray_icon.hide()
         window.deleteLater()
 

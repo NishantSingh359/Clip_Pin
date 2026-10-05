@@ -12,7 +12,7 @@ if (-not (Test-Path $pyinstaller)) {
     throw "PyInstaller was not found. Activate the project environment and install the project requirements first."
 }
 
-& $pyinstaller --noconfirm --clean --distpath (Join-Path $projectRoot "dist") --workpath (Join-Path $projectRoot "build") (Join-Path $projectRoot "ClipFlow.spec")
+& $pyinstaller --noconfirm --clean --distpath (Join-Path $projectRoot "dist") --workpath (Join-Path $projectRoot "build") (Join-Path $projectRoot "DockPaste.spec")
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE."
 }
@@ -29,9 +29,9 @@ if (-not $innoCandidates) {
 }
 
 $innoCompiler = $innoCandidates | Select-Object -First 1
-& $innoCompiler (Join-Path $projectRoot "installer\ClipFlow.iss")
+& $innoCompiler (Join-Path $projectRoot "installer\DockPaste.iss")
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed with exit code $LASTEXITCODE."
 }
 
-Write-Host "Installer created in dist\installer."
+Write-Host "DockPaste installer created in dist\installer."
