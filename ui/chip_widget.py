@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from base64 import b64encode
 from pathlib import Path
@@ -49,6 +50,10 @@ from config import (
     CHIP_MAX_WIDTH,
     CHIP_MIN_WIDTH,
     CHIP_HEIGHT,
+    COLOR_PREVIEW_ENABLED,
+    COLOR_PREVIEW_SWATCH_BORDER_COLOR,
+    COLOR_PREVIEW_SWATCH_BORDER_WIDTH,
+    COLOR_PREVIEW_SWATCH_SIZE,
     clip_indexing,
     CLIP_INDEX_FONT_SIZE,
     CLIP_INDEX_FONT_WEIGHT,
@@ -173,13 +178,20 @@ class ChipWidget(QWidget):
     context_action_triggered = Signal()
     favicon_loaded = Signal(bytes)
 
-    def __init__(self, content, min_width=CHIP_MIN_WIDTH, max_width=CHIP_MAX_WIDTH):
+    def __init__(
+        self,
+        content,
+        min_width=CHIP_MIN_WIDTH,
+        max_width=CHIP_MAX_WIDTH,
+        color_preview_enabled=COLOR_PREVIEW_ENABLED,
+    ):
         super().__init__()
 
         self.content = content
         self.min_width = min_width
         self.max_width = max(max_width, min_width)
         self.clip_index = None
+        self.color_preview_enabled = bool(color_preview_enabled)
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
@@ -314,6 +326,9 @@ class ChipWidget(QWidget):
         if content.startswith(("http://", "https://")):
             return "LINK"
 
+        if self.color_preview_enabled and self.parse_color_code(content) is not None:
+            return "COLOR"
+
         if Path(content).name.lower().startswith("screenshot") and content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
             return "IMG"
 
@@ -331,6 +346,9 @@ class ChipWidget(QWidget):
         if self.kind == "IMG":
             self.icon.show()
             self.set_image_thumb()
+        elif self.kind == "COLOR":
+            self.icon.show()
+            self.set_color_swatch()
         elif self.kind == "LINK":
             self.icon.show()
             self.icon.setText("")
@@ -365,8 +383,86 @@ class ChipWidget(QWidget):
         self.setFixedWidth(width)
         self.setFixedHeight(self._base_height)
 
+    def set_color_preview_enabled(self, enabled):
+        enabled = bool(enabled)
+        if self.color_preview_enabled == enabled:
+            return
+        self.color_preview_enabled = enabled
+        self.kind = self.detect_kind()
+        self.update_label()
+
+    @staticmethod
+    def parse_color_code(text):
+        value = text.strip()
+        hex_match = re.fullmatch(r"#?([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", value)
+        if hex_match:
+            digits = hex_match.group(1)
+            if len(digits) in (3, 4):
+                channels = [int(char * 2, 16) for char in digits]
+            else:
+                channels = [int(digits[index:index + 2], 16) for index in range(0, len(digits), 2)]
+            if len(channels) == 3:
+                channels.append(255)
+            elif len(channels) == 4 and len(digits) == 8:
+                channels = channels[:3] + [channels[3]]
+            return QColor(*channels)
+
+        rgb_match = re.fullmatch(
+            r"rgba?\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})"
+            r"\s*(?:,\s*(\d+(?:\.\d+)?)\s*)?\)",
+            value,
+            re.IGNORECASE,
+        )
+        if not rgb_match:
+            return None
+
+        red, green, blue = (int(rgb_match.group(index)) for index in (1, 2, 3))
+        if any(channel > 255 for channel in (red, green, blue)):
+            return None
+
+        alpha_text = rgb_match.group(4)
+        alpha = 255
+        if alpha_text is not None:
+            alpha_value = float(alpha_text)
+            if 0 <= alpha_value <= 1:
+                alpha = round(alpha_value * 255)
+            elif alpha_value <= 255 and alpha_value.is_integer():
+                alpha = int(alpha_value)
+            else:
+                return None
+        return QColor(red, green, blue, alpha)
+
+    def set_color_swatch(self):
+        color = self.parse_color_code(self.content)
+        if color is None:
+            return
+
+        size = max(1, int(COLOR_PREVIEW_SWATCH_SIZE))
+        border_width = max(0, int(COLOR_PREVIEW_SWATCH_BORDER_WIDTH))
+        self.icon.setFixedSize(size, size)
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = QRectF(pixmap.rect()).adjusted(
+            border_width / 2,
+            border_width / 2,
+            -border_width / 2,
+            -border_width / 2,
+        )
+        if border_width:
+            painter.setPen(QPen(parse_color(COLOR_PREVIEW_SWATCH_BORDER_COLOR), border_width))
+        else:
+            painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(rect)
+        painter.end()
+        self.icon.setPixmap(pixmap)
+
     def display_text(self):
         content = self.content.strip()
+        if self.kind == "COLOR":
+            return content
         if self.kind == "LINK":
             domain = urlparse(content).netloc
             return domain.removeprefix("www.") or content

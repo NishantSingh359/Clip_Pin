@@ -55,6 +55,7 @@ from config import (
     CHIP_WIDTH_MIN_LIMIT,
     CHIP_WIDTH_MAX_LIMIT,
     CHIP_WIDTH_DEFAULTS_VERSION,
+    COLOR_PREVIEW_ENABLED,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
     EMPTY_STATE_ICON_COLOR,
@@ -164,6 +165,7 @@ class MainWindow(QWidget):
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
+        self.color_preview_enabled = COLOR_PREVIEW_ENABLED
         self.close_to_tray_enabled = True
         self.start_with_windows_enabled = False
         self.chip_min_width = CHIP_MIN_WIDTH
@@ -342,7 +344,12 @@ class MainWindow(QWidget):
             return
 
         self._finish_chip_position_animation()
-        chip = ChipWidget(content, self.chip_min_width, self.chip_max_width)
+        chip = ChipWidget(
+            content,
+            self.chip_min_width,
+            self.chip_max_width,
+            color_preview_enabled=self.color_preview_enabled,
+        )
         self._assign_chip_number(chip)
         chip.paste_requested.connect(self.paste_clip)
         chip.copy_again_requested.connect(self.copy_again_clip)
@@ -697,6 +704,12 @@ class MainWindow(QWidget):
         self.refresh_chip_indexes()
         self._save_context_menu_settings()
 
+    def set_color_preview_enabled(self, enabled):
+        self.color_preview_enabled = bool(enabled)
+        for chip in self.chips_by_content.values():
+            chip.set_color_preview_enabled(self.color_preview_enabled)
+        self._save_context_menu_settings()
+
     def _context_menu_settings_path(self):
         settings_path = APP_STORAGE_DIR / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -716,6 +729,7 @@ class MainWindow(QWidget):
             self.show_on_hover_enabled = bool(settings.get("show_on_hover_enabled", self.show_on_hover_enabled))
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
+            self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
             self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
             if needs_sizing_defaults_migration:
@@ -749,6 +763,7 @@ class MainWindow(QWidget):
                         "show_on_hover_enabled": self.show_on_hover_enabled,
                         "hide_on_paste_enabled": self.hide_on_paste_enabled,
                         "clip_indexing_enabled": self.clip_indexing_enabled,
+                        "color_preview_enabled": self.color_preview_enabled,
                         "close_to_tray_enabled": self.close_to_tray_enabled,
                         "start_with_windows_enabled": self.start_with_windows_enabled,
                         "chip_min_width": self.chip_min_width,
@@ -802,6 +817,7 @@ class MainWindow(QWidget):
             show_on_hover=self.show_on_hover_enabled,
             hide_on_paste=self.hide_on_paste_enabled,
             show_clip_indexes=self.clip_indexing_enabled,
+            color_preview_enabled=self.color_preview_enabled,
             close_to_tray=self.close_to_tray_enabled,
             start_with_windows=self.start_with_windows_enabled,
             chip_min_width=self.chip_min_width,
@@ -810,6 +826,7 @@ class MainWindow(QWidget):
             on_show_on_hover=self.set_show_on_hover_enabled,
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
+            on_color_preview=self.set_color_preview_enabled,
             on_close_to_tray=self.set_close_to_tray_enabled,
             on_start_with_windows=self.set_start_with_windows_enabled,
             on_chip_min_width=self.set_chip_min_width,
