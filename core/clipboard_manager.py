@@ -9,7 +9,9 @@ from PySide6.QtGui import QImage, QClipboard
 
 from core.image_store import ImageStore
 from core.database import ClipboardDatabase
+from config import MAX_CLIP_ITEM_SIZE_BYTES
 from utils.app_logging import log_exception, safe_slot
+from utils.item_limits import is_oversized_file, is_oversized_text
 
 
 class ClipboardManager(QObject):
@@ -105,6 +107,13 @@ class ClipboardManager(QObject):
             if cache_key == self._last_image_cache_key:
                 return
 
+            source_size_bytes = self.image_store.image_payload_size(image, mime)
+            if source_size_bytes is None or source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
+                # Remember this image so repeated clipboard notifications do not
+                # repeatedly encode and reject the same oversized content.
+                self._last_image_cache_key = cache_key
+                return
+
             image_hash = self._hash_image(image)
             if not image_hash:
                 return
@@ -115,7 +124,13 @@ class ClipboardManager(QObject):
                 self._pending_image_hashes.add(image_hash)
 
             self._last_image_cache_key = cache_key
-            self._image_executor.submit(self._process_image, image.copy(), image_hash, True)
+            self._image_executor.submit(
+                self._process_image,
+                image.copy(),
+                image_hash,
+                True,
+                source_size_bytes,
+            )
             return
 
         if mime.hasUrls():
@@ -127,6 +142,8 @@ class ClipboardManager(QObject):
             if paths:
                 for path in paths:
                     content = str(path)
+                    if is_oversized_text(content) or is_oversized_file(path):
+                        continue
                     try:
                         self.db.insert_with_type(content, "path")
                         self.path_copied.emit(content)
@@ -138,13 +155,23 @@ class ClipboardManager(QObject):
         if not mime.hasText():
             return
 
-        text = mime.text().strip()
+        raw_text = mime.text()
+        if is_oversized_text(raw_text) or (
+            mime.hasHtml() and is_oversized_text(mime.html())
+        ):
+            self._last_text = raw_text
+            return
+
+        text = raw_text.strip()
         if not text or text == self._last_text:
             return
 
         self._last_text = text
         try:
-            if Path(text).exists():
+            path = Path(text)
+            if path.exists():
+                if is_oversized_text(text) or is_oversized_file(path):
+                    return
                 self.db.insert_with_type(text, "path")
                 self.path_copied.emit(text)
             else:
@@ -153,7 +180,7 @@ class ClipboardManager(QObject):
         except Exception:
             log_exception("Failed to store text clipboard item")
 
-    def _process_image(self, image, image_hash=None, reserved=False):
+    def _process_image(self, image, image_hash=None, reserved=False, source_size_bytes=None):
         try:
             image_hash = image_hash or self._hash_image(image)
             if not image_hash:
@@ -167,7 +194,11 @@ class ClipboardManager(QObject):
                     return
                 self._pending_image_hashes.add(image_hash)
 
-            image_path = self.image_store.save_image(image, "screenshot")
+            image_path = self.image_store.save_image(
+                image,
+                "screenshot",
+                source_size_bytes,
+            )
             if not image_path:
                 return
 

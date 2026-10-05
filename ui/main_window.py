@@ -169,6 +169,16 @@ class MainWindow(QWidget):
         )
         self._load_context_menu_settings()
 
+        # Refresh an existing Run entry. Older versions used sys.argv[0] for
+        # source launches, which can contain launcher arguments (for example
+        # `python.exe -m unittest`) and create a startup command that opens an
+        # unrelated path or fails to launch correctly.
+        if self.start_with_windows_enabled:
+            try:
+                self._set_windows_startup(True)
+            except Exception as exc:
+                log_exception(f"Failed to repair Windows startup entry: {exc}")
+
         self._create_tray_icon()
 
         self.setWindowFlags(
@@ -714,26 +724,25 @@ class MainWindow(QWidget):
         self.tray_icon.setToolTip(APP_NAME)
 
         tray_menu = QMenu(self)
-        self.tray_toggle_action = tray_menu.addAction("Open Copy Pin")
-        self.tray_toggle_action.triggered.connect(self.toggle_shelf_from_tray)
         tray_menu.addAction("Settings", self.open_settings)
         tray_menu.addSeparator()
-        tray_menu.addAction("Exit", QApplication.quit)
+        tray_menu.addAction("Exit", self.exit_application)
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
-        self._update_tray_toggle_action()
-
-    def _update_tray_toggle_action(self):
-        if hasattr(self, "tray_toggle_action"):
-            self.tray_toggle_action.setText("Hide Copy Pin" if self.is_open else "Open Copy Pin")
 
     def toggle_shelf_from_tray(self):
         if self.is_open:
             self.hide_shelf(force=True)
         else:
             self.show_shelf("cursor")
-        self._update_tray_toggle_action()
+
+    def exit_application(self, checked=False):
+        # Closing normally hides the shelf when close-to-tray is enabled.
+        # Tray Exit must bypass that behavior and run the regular shutdown path.
+        self.close_to_tray_enabled = False
+        self.tray_icon.hide()
+        self.close()
 
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -840,7 +849,7 @@ class MainWindow(QWidget):
                 if getattr(sys, "frozen", False):
                     command = f'"{sys.executable}"'
                 else:
-                    script_path = Path(sys.argv[0]).resolve()
+                    script_path = Path(__file__).resolve().parents[1] / "main.py"
                     command = f'"{sys.executable}" "{script_path}"'
                 winreg.SetValueEx(run_key, "Copy Pin", 0, winreg.REG_SZ, command)
             else:
@@ -945,7 +954,6 @@ class MainWindow(QWidget):
             self.hide_reset_timer.stop()
 
         self.is_open = True
-        self._update_tray_toggle_action()
 
         # Make sure the shelf is raised above the taskbar/dock layer on Windows
         # before animating it into view.
@@ -965,7 +973,6 @@ class MainWindow(QWidget):
             fade(popup, 1.0, 0.0, CHIP_CONTEXT_MENU_FADE_OUT_MS, finished=popup.close)
 
         self.is_open = False
-        self._update_tray_toggle_action()
         self._is_hiding = True
         if self.hide_reset_timer.isActive():
             self.hide_reset_timer.stop()

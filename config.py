@@ -10,6 +10,9 @@ THUMBNAIL_RETENTION_DAYS = 30
 THUMBNAIL_PURGE_PREFIXES = ("screenshot_", "drop_")
 MAX_STORED_IMAGE_DIMENSION = 1800
 MAX_STORED_IMAGE_BYTES = 12 * 1024 * 1024
+# Per-item cap (5 MiB): decoded bytes for images, UTF-8 bytes for text,
+# and file bytes for files copied or dropped as paths.
+MAX_CLIP_ITEM_SIZE_BYTES = 5 * 1024 * 1024
 DB_BUSY_TIMEOUT_MS = 2000
 DB_WRITE_RETRIES = 2
 DB_RETRY_DELAY_MS = 80

@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
 from config import (
+    MAX_CLIP_ITEM_SIZE_BYTES,
     MAX_STORED_IMAGE_BYTES,
     MAX_STORED_IMAGE_DIMENSION,
     THUMBNAILS_DIR,
@@ -65,10 +66,15 @@ class ImageStore:
                 log_exception(f"Failed to delete stored clipboard image: {path}")
         return deleted
 
-    def save_image(self, image_data, prefix="image"):
+    def save_image(self, image_data, prefix="image", source_size_bytes=None):
 
         image = self._as_image(image_data)
         if image is None or image.isNull():
+            return None
+
+        if source_size_bytes is None:
+            source_size_bytes = self.image_payload_size(image)
+        if source_size_bytes is None or source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
             return None
 
         image = self._bounded_image(image)
@@ -86,6 +92,37 @@ class ImageStore:
         except Exception:
             log_exception("Failed to save image thumbnail")
         return None
+
+    def image_payload_size(self, image_data, mime_data=None):
+        """Return the largest available image payload size in bytes.
+
+        Decoded image memory is included because compressed clipboard formats
+        can be much smaller than the QImage the app must process.
+        """
+        image = self._as_image(image_data)
+        if image is None or image.isNull():
+            return None
+
+        sizes = [self._size_in_bytes(image)]
+        if mime_data is not None:
+            try:
+                for mime_type in mime_data.formats():
+                    if isinstance(mime_type, str):
+                        format_name = mime_type
+                    else:
+                        try:
+                            format_name = bytes(mime_type).decode("ascii", errors="ignore")
+                        except (TypeError, ValueError):
+                            format_name = str(mime_type)
+                    if not format_name.lower().startswith("image/"):
+                        continue
+                    payload = bytes(mime_data.data(mime_type))
+                    if payload:
+                        sizes.append(len(payload))
+            except Exception:
+                log_exception("Failed to inspect encoded image data")
+
+        return max(sizes)
 
     def _as_image(self, image_data):
         if isinstance(image_data, QImage):
