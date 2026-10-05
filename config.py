@@ -2,9 +2,10 @@ import os
 from pathlib import Path
 
 
-APP_NAME = "Copy Pin"
+APP_NAME = "ClipFlow"
+APP_STORAGE_NAME = "Copy Pin"  # Preserve existing user data and settings path.
 BASE_DIR = Path(__file__).resolve().parent
-APP_STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or BASE_DIR) / APP_NAME
+APP_STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or BASE_DIR) / APP_STORAGE_NAME
 THUMBNAILS_DIR = "thumbnails"
 THUMBNAIL_RETENTION_DAYS = 30
 THUMBNAIL_PURGE_PREFIXES = ("screenshot_", "drop_")
@@ -68,9 +69,15 @@ SHELF_SHADOW_COLOR = "rgba(0, 0, 0, 0.4)"
 
 EMPTY_STATE_TEXT = "Nothing Here"
 EMPTY_STATE_TEXT_COLOR = "rgba(180, 186, 200, 0.72)"
-EMPTY_STATE_FONT_SIZE = 14 
+EMPTY_STATE_FONT_SIZE = 17
 EMPTY_STATE_FONT_WEIGHT = 600
-EMPTY_STATE_PADDING = (0, 12)
+EMPTY_STATE_PADDING = (5, 12)
+EMPTY_STATE_LEFT_PADDING = 15
+EMPTY_STATE_ICON_ENABLED = True
+EMPTY_STATE_ICON_PATH = "assets/icons/clear.svg"
+EMPTY_STATE_ICON_SIZE = 22
+EMPTY_STATE_ICON_COLOR = "rgba(180, 186, 200, 0.72)"
+EMPTY_STATE_ICON_SPACING = 5
 
 # =============
 # CHIP SETTINGS
@@ -146,7 +153,7 @@ THUMBNAIL_SHADOW_COLOR = "rgba(0, 0, 0, 0.45)"
 # ===============
 # SETTINGS WINDOW
 
-SETTINGS_WINDOW_TITLE = "Clip Pin Settings"
+SETTINGS_WINDOW_TITLE = "ClipFlow Settings"
 SETTINGS_WINDOW_MIN_WIDTH = 320
 SETTINGS_WINDOW_BACKGROUND_COLOR = "#202124"
 SETTINGS_WINDOW_TEXT_COLOR = "#c0c0c0"

@@ -1,6 +1,6 @@
-# Copy Pin
+# ClipFlow
 
-Copy Pin is a small clipboard history shelf for **PySide6 / Qt**. It lets you collect clipboard items (text, links, paths, images/screenshots), pin items, and quickly paste them back.
+ClipFlow is a small clipboard history shelf for **PySide6 / Qt**. It lets you collect clipboard items (text, links, paths, images/screenshots), pin items, and quickly paste them back.
 
 ## Features
 
@@ -18,34 +18,34 @@ Copy Pin is a small clipboard history shelf for **PySide6 / Qt**. It lets you co
 https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
 
 
-## ClipPin Installation Guide (Windows)
+## ClipFlow Installation Guide (Windows)
 
-### Download ClipPin
+### Download ClipFlow
 
 1. Go to: Releases → Latest Release
-2. Download: `ClipPin-v1.0.zip`
+2. Download: `ClipFlow-v1.0.zip`
 
 ---
 
 ### Extract The ZIP
 
-1. Right click: `ClipPin-v1.0.zip`
+1. Right click: `ClipFlow-v1.0.zip`
 2. Click: Extract All
 3. Extract to any permanent location.
 
 After extraction you should see:
 
 ``` text
-ClipPin/
-├── ClipPin.exe
+ClipFlow/
+├── ClipFlow.exe
 ├── _internal/
 ```
 
 ---
 
-### Run ClipPin
+### Run ClipFlow
 
-Double click: `ClipPin.exe`
+Double click: `ClipFlow.exe`
 
 The app should now launch.
 
@@ -53,7 +53,7 @@ The app should now launch.
 
 ### Windows SmartScreen Warning
 
-Because ClipPin is an indie/open-source app and not code-signed yet, Windows may show: `Windows protected your PC`
+Because ClipFlow is an indie/open-source app and not code-signed yet, Windows may show: `Windows protected your PC`
 
 If this happens:
 
@@ -67,9 +67,9 @@ This is normal for unsigned desktop applications.
 
 ### Auto Start With Windows
 
-Open the Copy Pin system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
+Open the ClipFlow system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
 
-To keep Copy Pin running after closing its shelf, enable **Keep running when closed** in Settings. Use **Exit** in the tray menu to fully quit the application.
+To keep ClipFlow running after closing its shelf, enable **Keep running when closed** in Settings. Use **Exit** in the tray menu to fully quit the application.
 ---
 
 ### Recommended System
@@ -81,7 +81,7 @@ To keep Copy Pin running after closing its shelf, enable **Keep running when clo
 
 ### Privacy
 
-ClipPin stores clipboard history locally on your computer.
+ClipFlow stores clipboard history locally on your computer.
 
 No cloud sync.
 No telemetry.

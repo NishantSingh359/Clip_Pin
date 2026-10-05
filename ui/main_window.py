@@ -26,7 +26,9 @@ from PySide6.QtGui import (
     QPainterPath,
     QRegion,
     QIcon,
+    QPixmap,
 )
+from PySide6.QtSvg import QSvgRenderer
 import ctypes
 import ctypes.wintypes
 import json
@@ -55,6 +57,12 @@ from config import (
     CHIP_WIDTH_DEFAULTS_VERSION,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
+    EMPTY_STATE_ICON_COLOR,
+    EMPTY_STATE_ICON_ENABLED,
+    EMPTY_STATE_ICON_PATH,
+    EMPTY_STATE_ICON_SIZE,
+    EMPTY_STATE_ICON_SPACING,
+    EMPTY_STATE_LEFT_PADDING,
     EMPTY_STATE_PADDING,
     EMPTY_STATE_TEXT,
     EMPTY_STATE_TEXT_COLOR,
@@ -261,6 +269,41 @@ class MainWindow(QWidget):
         container_layout.addWidget(self.scroll)
 
         main_layout.addWidget(self.container)
+        self.empty_state_widget = QWidget()
+        self.empty_state_widget.setStyleSheet("background: transparent;")
+        self.empty_state_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.empty_state_layout = QHBoxLayout(self.empty_state_widget)
+        self.empty_state_layout.setContentsMargins(
+            EMPTY_STATE_LEFT_PADDING,
+            0,
+            EMPTY_STATE_PADDING[1],
+            0,
+        )
+        self.empty_state_layout.setSpacing(EMPTY_STATE_ICON_SPACING)
+
+        self.empty_state_icon = QLabel()
+        self.empty_state_icon.setAlignment(Qt.AlignCenter)
+        self.empty_state_icon.setFixedSize(EMPTY_STATE_ICON_SIZE, EMPTY_STATE_ICON_SIZE)
+        self.empty_state_icon.setVisible(EMPTY_STATE_ICON_ENABLED)
+        if EMPTY_STATE_ICON_ENABLED:
+            icon_path = Path(EMPTY_STATE_ICON_PATH)
+            if not icon_path.is_absolute():
+                icon_path = Path(__file__).resolve().parent.parent / icon_path
+            renderer = QSvgRenderer(str(icon_path))
+            if renderer.isValid():
+                icon_pixmap = QPixmap(EMPTY_STATE_ICON_SIZE, EMPTY_STATE_ICON_SIZE)
+                icon_pixmap.fill(Qt.transparent)
+                icon_painter = QPainter(icon_pixmap)
+                renderer.render(icon_painter)
+                icon_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                icon_painter.fillRect(icon_pixmap.rect(), parse_color(EMPTY_STATE_ICON_COLOR))
+                icon_painter.end()
+                self.empty_state_icon.setPixmap(icon_pixmap)
+            else:
+                self.empty_state_icon.hide()
+
+        self.empty_state_layout.addWidget(self.empty_state_icon)
+
         self.empty_label = QLabel(EMPTY_STATE_TEXT)
         self.empty_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.empty_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -269,10 +312,11 @@ class MainWindow(QWidget):
                 color: {EMPTY_STATE_TEXT_COLOR};
                 font-size: {EMPTY_STATE_FONT_SIZE}px;
                 font-weight: {EMPTY_STATE_FONT_WEIGHT};
-                padding: {EMPTY_STATE_PADDING[0]}px {EMPTY_STATE_PADDING[1]}px;
+                padding: {EMPTY_STATE_PADDING[0]}px 0px;
             }}
         """)
-        self.chip_layout.addWidget(self.empty_label)
+        self.empty_state_layout.addWidget(self.empty_label)
+        self.chip_layout.addWidget(self.empty_state_widget)
         self.chip_layout.addStretch()
         self.update_empty_state()
         self.update_mask()
@@ -376,10 +420,10 @@ class MainWindow(QWidget):
             for index in range(self.chip_layout.count()):
                 item = self.chip_layout.itemAt(index)
                 widget = item.widget() if item else None
-                if widget and widget is not self.empty_label:
+                if widget and widget is not self.empty_state_widget:
                     has_chip_widgets = True
                     break
-            self.empty_label.setVisible(not self.chips_by_content and not has_chip_widgets)
+            self.empty_state_widget.setVisible(not self.chips_by_content and not has_chip_widgets)
 
     @safe_slot("Failed to clear unpinned clips")
     def clear_unpinned_clips(self):
@@ -499,7 +543,7 @@ class MainWindow(QWidget):
             widget = item.widget()
             if widget is None:
                 break
-            if widget is getattr(self, "empty_label", None):
+            if widget is getattr(self, "empty_state_widget", None):
                 continue
 
             if getattr(widget, "pinned", False):
@@ -527,7 +571,7 @@ class MainWindow(QWidget):
         for layout_index in range(self.chip_layout.count()):
             item = self.chip_layout.itemAt(layout_index)
             widget = item.widget() if item else None
-            if widget is None or widget is getattr(self, "empty_label", None):
+            if widget is None or widget is getattr(self, "empty_state_widget", None):
                 continue
             if hasattr(widget, "set_clip_index"):
                 chips.append(widget)
@@ -584,7 +628,7 @@ class MainWindow(QWidget):
             chip = item.widget()
             if (
                 chip
-                and chip is not getattr(self, "empty_label", None)
+                and chip is not getattr(self, "empty_state_widget", None)
                 and not getattr(chip, "pinned", False)
                 and not getattr(chip, "_is_deleting", False)
             ):
@@ -851,10 +895,12 @@ class MainWindow(QWidget):
                 else:
                     script_path = Path(__file__).resolve().parents[1] / "main.py"
                     command = f'"{sys.executable}" "{script_path}"'
-                winreg.SetValueEx(run_key, "Copy Pin", 0, winreg.REG_SZ, command)
-            else:
+                winreg.SetValueEx(run_key, "ClipFlow", 0, winreg.REG_SZ, command)
+            for value_name in ("Copy Pin", "ClipFlow"):
+                if enabled and value_name == "ClipFlow":
+                    continue
                 try:
-                    winreg.DeleteValue(run_key, "Copy Pin")
+                    winreg.DeleteValue(run_key, value_name)
                 except FileNotFoundError:
                     pass
 
@@ -985,7 +1031,7 @@ class MainWindow(QWidget):
         for index in range(self.chip_layout.count()):
             item = self.chip_layout.itemAt(index)
             chip = item.widget() if item else None
-            if chip is None or chip is getattr(self, "empty_label", None):
+            if chip is None or chip is getattr(self, "empty_state_widget", None):
                 continue
             chip.setVisible(True)
             if hasattr(chip, "_base_width"):
