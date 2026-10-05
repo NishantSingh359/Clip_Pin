@@ -43,6 +43,8 @@ SHELF_SHOW_ON_HOVER = True
 HIDE_ON_PASTE = True
 clip_indexing = True
 MAX_CHIPS = 100
+MAX_CHIPS_MIN = 50
+MAX_CHIPS_MAX = 500
 
 # ==============
 # SHELF SETTINGS

@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 )
 
 from config import (
+    MAX_CHIPS_MIN,
+    MAX_CHIPS_MAX,
     CHIP_WIDTH_MIN_LIMIT,
     CHIP_WIDTH_MAX_LIMIT,
     SETTINGS_WINDOW_SECTION_SPACING,
@@ -55,6 +57,7 @@ class SettingsDialog(QDialog):
         start_with_windows,
         chip_min_width,
         chip_max_width,
+        max_chips,
         shelf_width_ratio,
         on_show_on_hover,
         on_hide_on_paste,
@@ -64,6 +67,7 @@ class SettingsDialog(QDialog):
         on_start_with_windows,
         on_chip_min_width,
         on_chip_max_width,
+        on_max_chips,
         on_shelf_width_ratio,
         parent=None,
     ):
@@ -121,6 +125,13 @@ class SettingsDialog(QDialog):
         self.chip_max_width.setValue(chip_max_width)
         self.chip_max_width.valueChanged.connect(on_chip_max_width)
         chip_form.addRow("Maximum width", self.chip_max_width)
+
+        self.max_chips = QSpinBox()
+        self.max_chips.setRange(MAX_CHIPS_MIN, MAX_CHIPS_MAX)
+        self.max_chips.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.max_chips.setValue(max_chips)
+        self.max_chips.valueChanged.connect(on_max_chips)
+        chip_form.addRow("Maximum chips", self.max_chips)
         layout.addWidget(chip_group)
 
         layout.addSpacing(SETTINGS_WINDOW_SECTION_SPACING)

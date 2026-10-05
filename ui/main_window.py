@@ -55,6 +55,8 @@ from config import (
     CHIP_WIDTH_MIN_LIMIT,
     CHIP_WIDTH_MAX_LIMIT,
     CHIP_WIDTH_DEFAULTS_VERSION,
+    MAX_CHIPS_MIN,
+    MAX_CHIPS_MAX,
     COLOR_PREVIEW_ENABLED,
     EMPTY_STATE_FONT_SIZE,
     EMPTY_STATE_FONT_WEIGHT,
@@ -170,6 +172,7 @@ class MainWindow(QWidget):
         self.start_with_windows_enabled = False
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
+        self.max_chips = MAX_CHIPS
         self.shelf_width_ratio = SHELF_WIDTH_RATIO
         self._next_chip_number = 1
         self._settings_dialog = None
@@ -619,7 +622,7 @@ class MainWindow(QWidget):
     @safe_slot("Failed to trim chips")
     def trim_chips(self):
         chips_to_remove = []
-        while len(self.chips_by_content) > MAX_CHIPS:
+        while len(self.chips_by_content) > self.max_chips:
             chip = self.oldest_unpinned_chip()
             if chip is None:
                 break
@@ -732,6 +735,10 @@ class MainWindow(QWidget):
             self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
             self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
+            self.max_chips = max(
+                MAX_CHIPS_MIN,
+                min(MAX_CHIPS_MAX, int(settings.get("max_chips", self.max_chips))),
+            )
             if needs_sizing_defaults_migration:
                 self.chip_min_width = CHIP_MIN_WIDTH
                 self.chip_max_width = CHIP_MAX_WIDTH
@@ -768,6 +775,7 @@ class MainWindow(QWidget):
                         "start_with_windows_enabled": self.start_with_windows_enabled,
                         "chip_min_width": self.chip_min_width,
                         "chip_max_width": self.chip_max_width,
+                        "max_chips": self.max_chips,
                         "shelf_width_ratio": self.shelf_width_ratio,
                         "chip_width_defaults_version": CHIP_WIDTH_DEFAULTS_VERSION,
                     },
@@ -822,6 +830,7 @@ class MainWindow(QWidget):
             start_with_windows=self.start_with_windows_enabled,
             chip_min_width=self.chip_min_width,
             chip_max_width=self.chip_max_width,
+            max_chips=self.max_chips,
             shelf_width_ratio=self.shelf_width_ratio,
             on_show_on_hover=self.set_show_on_hover_enabled,
             on_hide_on_paste=self.set_hide_on_paste_enabled,
@@ -831,11 +840,17 @@ class MainWindow(QWidget):
             on_start_with_windows=self.set_start_with_windows_enabled,
             on_chip_min_width=self.set_chip_min_width,
             on_chip_max_width=self.set_chip_max_width,
+            on_max_chips=self.set_max_chips,
             on_shelf_width_ratio=self.set_shelf_width_ratio,
             parent=None,
         )
         self._settings_dialog.setWindowIcon(self.tray_icon.icon())
         self._settings_dialog.show()
+
+    def set_max_chips(self, max_chips):
+        self.max_chips = max(MAX_CHIPS_MIN, min(MAX_CHIPS_MAX, int(max_chips)))
+        self.trim_chips()
+        self._save_context_menu_settings()
 
     def set_chip_min_width(self, width):
         self.chip_min_width = max(

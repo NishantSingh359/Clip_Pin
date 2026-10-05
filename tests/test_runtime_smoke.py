@@ -397,8 +397,23 @@ class TestRuntimeSmoke(unittest.TestCase):
         dialog = window._settings_dialog
         self.assertEqual((dialog.chip_min_width.value(), dialog.chip_min_width.minimum(), dialog.chip_min_width.maximum()), (120, 100, 500))
         self.assertEqual((dialog.chip_max_width.value(), dialog.chip_max_width.minimum(), dialog.chip_max_width.maximum()), (350, 100, 500))
+        self.assertEqual((dialog.max_chips.value(), dialog.max_chips.minimum(), dialog.max_chips.maximum()), (100, 50, 500))
         self.assertEqual((dialog.shelf_width_ratio.value(), dialog.shelf_width_ratio.minimum(), dialog.shelf_width_ratio.maximum()), (0.98, 0.50, 0.98))
         dialog.close()
+        window.tray_icon.hide()
+        window.deleteLater()
+
+    def test_settings_dialog_max_chips_uses_default_and_bounds(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.open_settings()
+        control = window._settings_dialog.max_chips
+        self.assertEqual((control.value(), control.minimum(), control.maximum()), (100, 50, 500))
+        window._settings_dialog.close()
         window.tray_icon.hide()
         window.deleteLater()
 
@@ -429,7 +444,7 @@ class TestRuntimeSmoke(unittest.TestCase):
             window.tray_icon.hide()
             window.deleteLater()
 
-    def test_chip_width_and_shelf_ratio_settings_apply_and_persist(self):
+    def test_chip_width_chip_count_and_shelf_ratio_settings_apply_and_persist(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             settings_file = Path(temp_dir) / "settings.json"
             with patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
@@ -454,9 +469,14 @@ class TestRuntimeSmoke(unittest.TestCase):
                 self.assertEqual(chip.width(), 160)
 
                 window.set_shelf_width_ratio(0.75)
+                window.set_max_chips(49)
+                self.assertEqual(window.max_chips, 50)
+                window.set_max_chips(501)
+                self.assertEqual(window.max_chips, 500)
                 saved_settings = json.loads(settings_file.read_text(encoding="utf-8"))
                 self.assertEqual(saved_settings["chip_min_width"], 160)
                 self.assertEqual(saved_settings["chip_max_width"], 160)
+                self.assertEqual(saved_settings["max_chips"], 500)
                 self.assertEqual(saved_settings["shelf_width_ratio"], 0.75)
 
             window.tray_icon.hide()
