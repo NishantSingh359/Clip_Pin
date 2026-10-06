@@ -173,6 +173,9 @@ class SettingsDialog(QDialog):
                 color: {text_color};
                 font-size: {settings.get("font_size", 13)}px;
             }}
+            QLabel {{
+                color: {text_color};
+            }}
             QLabel#settingsHeading {{
                 color: {heading_color};
                 font-size: {settings.get("heading_font_size", 17)}px;
@@ -193,6 +196,7 @@ class SettingsDialog(QDialog):
                 padding: 0 4px;
             }}
             QCheckBox {{
+                color: {text_color};
                 spacing: {settings.get("checkbox_spacing", 10)}px;
                 padding: {settings.get("checkbox_padding", [5, 2])[0]}px {settings.get("checkbox_padding", [5, 2])[1]}px;
             }}
@@ -216,6 +220,20 @@ class SettingsDialog(QDialog):
                 border-radius: {settings.get("button_border_radius", 5)}px;
             }}
             QPushButton:hover {{ background: {button_hover}; }}
+            QComboBox {{
+                color: {text_color};
+                background: {checkbox_background};
+                border: 1px solid {button_border};
+                border-radius: {settings.get("button_border_radius", 5)}px;
+                padding: 4px 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                color: {text_color};
+                background: {background};
+                selection-background-color: {checkbox_checked};
+                selection-color: #ffffff;
+                border: 1px solid {button_border};
+            }}
             QSpinBox, QDoubleSpinBox {{
                 min-width: 88px;
                 padding: 4px 6px;

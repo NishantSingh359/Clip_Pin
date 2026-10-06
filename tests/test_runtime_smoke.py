@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from PySide6.QtTest import QTest
 
@@ -198,6 +198,57 @@ class TestRuntimeSmoke(unittest.TestCase):
             window.update_screen_geometry("cursor")
 
         self.assertEqual(window.hidden_pos.y(), fake_screen.geometry().top() - window.height() - 10)
+        window.deleteLater()
+
+    def test_screen_geometry_sets_a_stable_window_size(self):
+        class FakeGeometry:
+            def __init__(self, left, top, width, height):
+                self._left = left
+                self._top = top
+                self._width = width
+                self._height = height
+
+            def left(self):
+                return self._left
+
+            def top(self):
+                return self._top
+
+            def width(self):
+                return self._width
+
+            def height(self):
+                return self._height
+
+        class FakeScreen:
+            def __init__(self):
+                self._available = FakeGeometry(0, 40, 1600, 900)
+                self._full = FakeGeometry(0, 0, 1600, 1000)
+
+            def availableGeometry(self):
+                return self._available
+
+            def geometry(self):
+                return self._full
+
+            def name(self):
+                return "fake"
+
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        fake_screen = FakeScreen()
+        with patch.object(window, "screen_for_hint", return_value=fake_screen):
+            window.update_screen_geometry("cursor")
+
+        expected_width = int(fake_screen.availableGeometry().width() * window.shelf_width_ratio)
+        expected_height = int(window.theme.get("shelf", {}).get("height", 52))
+        self.assertEqual(window.size(), QSize(expected_width + window._shadow_margin * 2, expected_height + window._shadow_margin * 2))
+        self.assertEqual(window.minimumSize(), window.size())
+        self.assertEqual(window.maximumSize(), window.size())
         window.deleteLater()
 
     def test_hide_in_progress_prevents_immediate_reopen(self):

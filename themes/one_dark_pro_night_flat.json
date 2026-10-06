@@ -1,0 +1,163 @@
+{
+  "name": "one_dark_pro_night_flat",
+  "display_name": "One Dark Pro Night Flat",
+  "shelf": {
+    "background": "#16191d",
+    "border": "#37393d",
+    "shadow": "rgba(0, 0, 0, 0.4)",
+    "height": 52,
+    "top_margin": 6,
+    "padding": [
+      9,
+      0,
+      9,
+      0
+    ],
+    "margin": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "spacing": 5,
+    "border_width": 1,
+    "border_radius": 27,
+    "shadow_blur_radius": 10,
+    "shadow_offset": [
+      0,
+      2
+    ]
+  },
+  "chip": {
+    "height": 32,
+    "padding": [
+      10,
+      0,
+      10,
+      0
+    ],
+    "spacing": 8,
+    "border_radius": 15,
+    "border_width": 1,
+    "text": "#abb2bf",
+    "font_size": 15,
+    "font_weight": 600,
+    "default": "#1e2227",
+    "hover": "#2c313a",
+    "pinned": "#23272e",
+    "pressed": "#23272e",
+    "border": "#3e4452",
+    "hover_border": "#3e4452",
+    "pinned_border": "#3e4452",
+    "index": "#667187",
+    "index_font_size": 11,
+    "index_font_weight": 700,
+    "icon_size": 18,
+    "icon_color": "#abb2bf",
+    "open_icon_path": "assets/icons/open_link.svg",
+    "open_icon_color": "#61afef",
+    "folder_icon_path": "assets/icons/folder.svg",
+    "folder_icon_color": "#abb2bf",
+    "file_icon_path": "assets/icons/file.svg",
+    "favicon_size": 22,
+    "folder_icon_size": 22,
+    "color_preview_size": 22,
+    "color_preview_border_color": "rgba(171, 178, 191, 0.25)",
+    "color_preview_border_width": 1,
+    "thumbnail_border_radius": 4,
+    "thumbnail_shadow_blur_radius": 3,
+    "thumbnail_shadow_offset": [
+      0,
+      1
+    ],
+    "thumbnail_shadow_color": "rgba(0, 0, 0, 0.45)"
+  },
+  "context_menu": {
+    "background": "#16191d",
+    "border": "#3e4452",
+    "hover": "#2c313a",
+    "border_width": 1.2,
+    "border_radius": 50,
+    "padding": 6,
+    "item_size": 16,
+    "item_padding": 5,
+    "item_margin": 2,
+    "item_border_radius": 7,
+    "icon_size": 18,
+    "icon_color": "#abb2bf",
+    "icon_stroke_width": 1,
+    "destructive_icon_color": "#e06c75",
+    "pin_icon": "<path d=\"M12 17v5\"/><path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\"/>",
+    "unpin_icon": "<path d=\"M12 17v5\"/><path d=\"M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89\"/><path d=\"m2 2 20 20\"/><path d=\"M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11\"/>",
+    "copy_icon": "<rect x=\"8\" y=\"7\" width=\"11\" height=\"13\" rx=\"2\"/><path d=\"M16 7V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2\"/>",
+    "delete_icon": "<path d=\"M4 7h16\"/><path d=\"M10 11v6m4-6v6\"/><path d=\"m6 7 1 13h10l1-13M9 7V4h6v3\"/>",
+    "clear_icon": "<path d=\"m16 22-1-4\"/><path d=\"M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1\"/><path d=\"M19 14H5l-1.973 6.767A1 1 0 0 0 4 22h16a1 1 0 0 0 .973-1.233z\"/><path d=\"m8 22 1-4\"/>"
+  },
+  "settings": {
+    "window_title": "DockPaste Settings",
+    "background": "#16191d",
+    "text": "#abb2bf",
+    "heading": "#abb2bf",
+    "font_size": 13,
+    "heading_font_size": 17,
+    "heading_font_weight": 600,
+    "content_margins": [
+      20,
+      18,
+      20,
+      16
+    ],
+    "layout_spacing": 10,
+    "section_spacing": 18,
+    "heading_bottom_padding": 6,
+    "checkbox_spacing": 10,
+    "checkbox_padding": [
+      5,
+      2
+    ],
+    "checkbox_indicator_size": 16,
+    "checkbox_border": "#404754",
+    "checkbox_border_radius": 4,
+    "checkbox_background": "#1d1f23",
+    "checkbox_checked": "#4d78cc",
+    "button_min_width": 64,
+    "button_padding": [
+      6,
+      12
+    ],
+    "button_background": "#30333d",
+    "button_border": "#3e4452",
+    "button_border_radius": 5,
+    "button_hover": "#404754"
+  },
+  "empty": {
+    "text": "Nothing Here",
+    "text_color": "#667187",
+    "font_size": 17,
+    "font_weight": 600,
+    "padding": [
+      5,
+      12
+    ],
+    "left_padding": 15,
+    "icon_enabled": true,
+    "icon_path": "assets/icons/clear.svg",
+    "icon_size": 22,
+    "icon_color": "#667187",
+    "icon_spacing": 5
+  },
+  "preview": {
+    "background": "rgba(44, 49, 60, 0.45)",
+    "text": "#abb2bf",
+    "border": "rgba(62, 68, 82, 0.75)",
+    "border_radius": 12,
+    "padding": [
+      10,
+      12
+    ],
+    "font_size": 13
+  },
+  "scroll_viewport": {
+    "border_radius": 40
+  }
+}

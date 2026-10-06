@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QParallelAnimationGroup,
     QEasingCurve,
+    QSize,
 )
 from PySide6.QtGui import (
     QAction,
@@ -227,10 +228,9 @@ class MainWindow(QWidget):
         self.animation.setDuration(MOTION_SHELF_MS)
         self.animation.setEasingCurve(QEasingCurve.OutCubic)
 
+        self.setup_ui()
         self.update_screen_geometry()
         self.move(self.hidden_pos)
-
-        self.setup_ui()
         self.refresh_chip_indexes()
 
         self.auto_hide_timer = QTimer(self)
@@ -1212,8 +1212,9 @@ class MainWindow(QWidget):
         shelf_top_margin = int(self.theme.get("shelf", {}).get("top_margin", 6))
         window_width = width + self._shadow_margin * 2
         window_height = shelf_height + self._shadow_margin * 2
-        if self.width() != window_width or self.height() != window_height:
-            self.resize(window_width, window_height)
+        window_size = QSize(window_width, window_height)
+        if self.size() != window_size:
+            self.setFixedSize(window_size)
 
         x = geometry.left() + (geometry.width() - width) // 2 - self._shadow_margin
         y = geometry.top() + shelf_top_margin - self._shadow_margin

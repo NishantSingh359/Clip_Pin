@@ -25,12 +25,21 @@ app = QApplication.instance() or QApplication([])
 
 
 class TestThemeManager(unittest.TestCase):
-    def test_builtin_themes_are_dark_only(self):
+    def test_builtin_themes_are_dark_themes(self):
         themes = ThemeManager()
 
-        self.assertEqual(themes.available_themes(), [("dark", "Dark")])
+        self.assertEqual(
+            themes.available_themes(),
+            [
+                ("dark", "Dark"),
+                ("dracula", "Dracula"),
+                ("one_dark_pro_night_flat", "One Dark Pro Night Flat"),
+            ],
+        )
         self.assertTrue(themes.is_valid(DEFAULT_THEME))
         self.assertTrue(themes.is_valid("DARK"))
+        self.assertTrue(themes.is_valid("Dracula"))
+        self.assertTrue(themes.is_valid("One_Dark_Pro_Night_Flat"))
         self.assertFalse(themes.is_valid("light"))
 
     def test_behavioral_settings_are_not_defined_in_theme(self):
