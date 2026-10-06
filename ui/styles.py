@@ -2,9 +2,9 @@ import ctypes
 import sys
 from PySide6.QtGui import QColor
 
-def apply_acrylic(window):
-    """Applies Windows acrylic theme to the window."""
-    if sys.platform != "win32":
+def apply_acrylic(window, enabled=True):
+    """Applies Windows acrylic to a window when enabled."""
+    if sys.platform != "win32" or not enabled:
         return
 
     # Force native window handle creation

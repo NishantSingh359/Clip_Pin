@@ -13,7 +13,7 @@ from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.main_window import MainWindow
-from config import CHIP_LAYOUT_ANIMATION_MS
+from animation_config import CHIP_LAYOUT_ANIMATION_MS
 
 
 app = QApplication.instance() or QApplication([])
@@ -101,7 +101,7 @@ class TestRuntimeSmoke(unittest.TestCase):
 
         fade_popup.assert_called_once()
         self.assertEqual(fade_popup.call_args.args[:3], (menu, 1.0, 0.0))
-        from config import CHIP_CONTEXT_MENU_FADE_OUT_MS
+        from animation_config import CHIP_CONTEXT_MENU_FADE_OUT_MS
 
         self.assertEqual(fade_popup.call_args.args[3], CHIP_CONTEXT_MENU_FADE_OUT_MS)
         close_callback = fade_popup.call_args.kwargs["finished"]
@@ -245,7 +245,9 @@ class TestRuntimeSmoke(unittest.TestCase):
         window.deleteLater()
 
     def test_clip_indexing_toggle_updates_state(self):
-        with patch("ui.main_window.ClipboardManager"), \
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+             patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \
              patch("ui.main_window.PasteController"), \
              patch("ui.main_window.QTimer"):
@@ -256,6 +258,7 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertFalse(window.clip_indexing_enabled)
         window.set_clip_indexing_enabled(True)
         self.assertTrue(window.clip_indexing_enabled)
+        window.tray_icon.hide()
         window.deleteLater()
 
     def test_show_shelf_brings_window_to_front(self):
@@ -285,7 +288,7 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertIn("border-radius", window.scroll.viewport().styleSheet().lower())
         window.deleteLater()
 
-    def test_tray_icon_has_open_settings_and_exit_actions(self):
+    def test_tray_icon_has_settings_and_exit_actions(self):
         with patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \
              patch("ui.main_window.PasteController"), \
@@ -295,29 +298,8 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertTrue(window.tray_icon.isVisible())
         self.assertEqual(
             [action.text() for action in window.tray_icon.contextMenu().actions() if not action.isSeparator()],
-            ["Open DockPaste", "Settings", "Exit"],
+            ["Settings", "Exit"],
         )
-        window.tray_icon.hide()
-        window.deleteLater()
-
-    def test_tray_activation_toggles_shelf(self):
-        with patch("ui.main_window.ClipboardManager"), \
-             patch("ui.main_window.DragDropHandler"), \
-             patch("ui.main_window.PasteController"), \
-             patch("ui.main_window.QTimer"):
-            window = MainWindow()
-
-        with patch.object(window, "update_screen_geometry"), \
-             patch.object(window.paste_controller, "foreground_window", return_value=None), \
-             patch.object(window, "animate_to"):
-            window._on_tray_activated(QSystemTrayIcon.Trigger)
-        self.assertTrue(window.is_open)
-        self.assertEqual(window.tray_toggle_action.text(), "Hide DockPaste")
-
-        with patch.object(window, "animate_to"):
-            window._on_tray_activated(QSystemTrayIcon.Trigger)
-        self.assertFalse(window.is_open)
-        self.assertEqual(window.tray_toggle_action.text(), "Open DockPaste")
         window.tray_icon.hide()
         window.deleteLater()
 
@@ -404,7 +386,9 @@ class TestRuntimeSmoke(unittest.TestCase):
         window.deleteLater()
 
     def test_settings_dialog_max_chips_uses_default_and_bounds(self):
-        with patch("ui.main_window.ClipboardManager"), \
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+             patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \
              patch("ui.main_window.PasteController"), \
              patch("ui.main_window.QTimer"):

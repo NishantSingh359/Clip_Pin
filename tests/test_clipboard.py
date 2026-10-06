@@ -3,23 +3,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QUrl
+from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QPoint, QUrl
 from PySide6.QtGui import QClipboard, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
-from config import CHIP_HOVER_BACKGROUND, CHIP_HOVER_COLOR_DURATION_MS, CHIP_TEXT_FONT_SIZE, CLIP_INDEX_FONT_SIZE, CLIP_INDEX_TEXT_COLOR
 from core.clipboard_manager import ClipboardManager
-from ui.chip_widget import ChipWidget
+from ui.chip_widget import ChipContextMenu, ChipWidget
+from ui.theme_manager import ThemeManager
 
 
 app = QApplication.instance() or QApplication([])
+DARK_THEME = ThemeManager().get_theme("dark")
 
 
 class TestChipWidget(unittest.TestCase):
     def test_displays_text_content(self):
         chip = ChipWidget("hello world")
         self.assertEqual(chip.display_text(), "hello world")
-        self.assertIn(f"font-size: {CHIP_TEXT_FONT_SIZE}px", chip.title.styleSheet())
+        self.assertIn(f"font-size: {DARK_THEME['chip']['font_size']}px", chip.title.styleSheet())
         chip.deleteLater()
 
     def test_loaded_favicon_survives_chip_index_refresh(self):
@@ -38,14 +39,38 @@ class TestChipWidget(unittest.TestCase):
         self.assertEqual((chip.icon.pixmap().width(), chip.icon.pixmap().height()), (22, 22))
         chip.deleteLater()
 
-    def test_hover_background_uses_configured_smooth_transition(self):
+    def test_hover_background_uses_configured_theme_color(self):
         chip = ChipWidget("hover test")
 
         chip.set_hovered(True)
 
-        self.assertIsNotNone(chip._background_animation)
-        self.assertEqual(chip._background_animation.duration(), CHIP_HOVER_COLOR_DURATION_MS)
-        self.assertEqual(chip._background_animation.endValue().name(), "#3c3c3c")
+        self.assertIn("background-color: rgba(40, 40, 40, 1.000)", chip.styleSheet())
+        chip.deleteLater()
+
+    def test_context_menu_icons_render_visible_pixels(self):
+        captured_menu = None
+
+        def capture_menu(menu, position):
+            nonlocal captured_menu
+            captured_menu = menu
+
+        chip = ChipWidget("context menu icon test", theme=DARK_THEME)
+        with patch.object(ChipContextMenu, "exec", new=capture_menu):
+            chip.show_context_menu(QPoint(0, 0))
+
+        self.assertIsNotNone(captured_menu)
+        icon_actions = [action.defaultWidget() for action in captured_menu.actions()]
+        self.assertGreater(len(icon_actions), 0)
+        for button in icon_actions:
+            icon_image = button.icon().pixmap(18, 18).toImage()
+            visible_pixels = sum(
+                1
+                for y in range(icon_image.height())
+                for x in range(icon_image.width())
+                if icon_image.pixelColor(x, y).alpha() > 0
+            )
+            self.assertGreater(visible_pixels, 0)
+
         chip.deleteLater()
 
     def test_transient_paste_restores_previous_clipboard_content(self):
@@ -86,8 +111,8 @@ class TestChipWidget(unittest.TestCase):
         self.assertEqual(chip.index_label.text(), "3")
         self.assertFalse(chip.index_label.isHidden())
         style = chip.index_label.styleSheet()
-        self.assertIn(CLIP_INDEX_TEXT_COLOR, style)
-        self.assertIn(f"font-size: {CLIP_INDEX_FONT_SIZE}px", style)
+        self.assertIn(DARK_THEME["chip"]["index"], style)
+        self.assertIn(f"font-size: {DARK_THEME['chip']['index_font_size']}px", style)
         chip.deleteLater()
 
     def test_image_chip_uses_elided_file_name(self):

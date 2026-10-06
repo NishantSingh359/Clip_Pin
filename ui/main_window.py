@@ -47,59 +47,39 @@ from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
 from ui.animations import fade, parse_color
+from ui.theme_manager import ThemeManager, get_theme_value, set_active_theme
+from animation_config import (
+    CHIP_CONTEXT_MENU_FADE_OUT_MS,
+    CHIP_LAYOUT_ANIMATION_MS,
+    MOTION_ENABLED,
+    MOTION_SHELF_MS,
+    SHELF_CHIP_REVEAL_ENABLED,
+    SHELF_CHIP_REVEAL_MS,
+    SHELF_CHIP_REVEAL_STAGGER_MS,
+    SHELF_CHIP_REVEAL_OFFSET,
+)
 from config import (
     APP_NAME,
     APP_STORAGE_DIR,
+    CHIP_WIDTH_DEFAULTS_VERSION,
     CHIP_MIN_WIDTH,
     CHIP_MAX_WIDTH,
     CHIP_WIDTH_MIN_LIMIT,
     CHIP_WIDTH_MAX_LIMIT,
-    CHIP_WIDTH_DEFAULTS_VERSION,
     MAX_CHIPS_MIN,
     MAX_CHIPS_MAX,
     COLOR_PREVIEW_ENABLED,
-    EMPTY_STATE_FONT_SIZE,
-    EMPTY_STATE_FONT_WEIGHT,
-    EMPTY_STATE_ICON_COLOR,
-    EMPTY_STATE_ICON_ENABLED,
-    EMPTY_STATE_ICON_PATH,
-    EMPTY_STATE_ICON_SIZE,
-    EMPTY_STATE_ICON_SPACING,
-    EMPTY_STATE_LEFT_PADDING,
-    EMPTY_STATE_PADDING,
-    EMPTY_STATE_TEXT,
-    EMPTY_STATE_TEXT_COLOR,
     HIDE_DISTANCE,
     HOVER_TRIGGER_HEIGHT,
     HOVER_TRIGGER_WIDTH,
     MAX_CHIPS,
     MOUSE_POLL_MS,
-    MOTION_ENABLED,
-    CHIP_CONTEXT_MENU_FADE_OUT_MS,
-    MOTION_SHELF_MS,
-    CHIP_LAYOUT_ANIMATION_MS,
-    SHELF_CHIP_REVEAL_ENABLED,
-    SHELF_CHIP_REVEAL_MS,
-    SHELF_CHIP_REVEAL_STAGGER_MS,
-    SHELF_CHIP_REVEAL_OFFSET,
     SHELF_SHOW_ON_HOVER,
-    SHELF_HEIGHT,
-    SHELF_TOP_MARGIN,
     HIDE_ON_PASTE,
     clip_indexing,
     SHELF_WIDTH_RATIO,
     SHELF_WIDTH_RATIO_MIN,
     SHELF_WIDTH_RATIO_MAX,
-    SHELF_BACKGROUND_COLOR,
-    SHELF_BORDER_COLOR,
-    SHELF_BORDER_WIDTH,
-    SHELF_BORDER_RADIUS,
-    SHELF_SHADOW_BLUR_RADIUS,
-    SHELF_SHADOW_OFFSET,
-    SHELF_SHADOW_COLOR,
-    SHELF_MARGIN,
-    SHELF_PADDING,
-    SHELF_SPACING,
     SHELF_AUTO_HIDE_DELAY
 )
 from utils.app_logging import log_exception, safe_slot
@@ -107,17 +87,39 @@ from utils.app_logging import log_exception, safe_slot
 
 class ShelfContainer(QWidget):
     """Custom container widget with rounded corners."""
-    def __init__(self):
+    def __init__(self, theme):
         super().__init__()
         self.setObjectName("shelfContainer")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(SHELF_HEIGHT)
-        if SHELF_SHADOW_BLUR_RADIUS > 0:
+        self.theme = theme
+        self._set_theme_values()
+
+    def _set_theme_values(self):
+        shelf = self.theme.get("shelf", {})
+        self.background_color = shelf.get("background", "rgba(20, 20, 20, 1)")
+        self.border_color = shelf.get("border", "rgba(255, 255, 255, 0.07)")
+        self.shadow_color = shelf.get("shadow", "rgba(0, 0, 0, 0.4)")
+        self.height = int(shelf.get("height", 52))
+        self.border_width = float(shelf.get("border_width", 1))
+        self.border_radius = float(shelf.get("border_radius", 27))
+        self.shadow_blur_radius = float(shelf.get("shadow_blur_radius", 10))
+        self.shadow_offset = tuple(shelf.get("shadow_offset", [0, 2]))
+        self.setFixedHeight(self.height)
+        self._apply_shadow()
+        self.update()
+
+    def _apply_shadow(self):
+        self.setGraphicsEffect(None)
+        if self.shadow_blur_radius > 0:
             shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(SHELF_SHADOW_BLUR_RADIUS)
-            shadow.setOffset(*SHELF_SHADOW_OFFSET)
-            shadow.setColor(parse_color(SHELF_SHADOW_COLOR))
+            shadow.setBlurRadius(self.shadow_blur_radius)
+            shadow.setOffset(*self.shadow_offset)
+            shadow.setColor(parse_color(self.shadow_color))
             self.setGraphicsEffect(shadow)
+
+    def set_theme(self, theme):
+        self.theme = theme
+        self._set_theme_values()
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -125,22 +127,22 @@ class ShelfContainer(QWidget):
         
         path = QPainterPath()
         rect = self.rect()
-        if SHELF_BORDER_WIDTH > 0:
-            margin = SHELF_BORDER_WIDTH / 2.0
+        if self.border_width > 0:
+            margin = self.border_width / 2.0
             rect_f = rect.toRectF().adjusted(margin, margin, -margin, -margin)
         else:
             rect_f = rect.toRectF()
             
-        path.addRoundedRect(rect_f, SHELF_BORDER_RADIUS, SHELF_BORDER_RADIUS)
+        path.addRoundedRect(rect_f, self.border_radius, self.border_radius)
         
-        bg_color = parse_color(SHELF_BACKGROUND_COLOR)
+        bg_color = parse_color(self.background_color)
         painter.fillPath(path, bg_color)
         
-        if SHELF_BORDER_WIDTH > 0:
-            border_color = parse_color(SHELF_BORDER_COLOR)
+        if self.border_width > 0:
+            border_color = parse_color(self.border_color)
             pen = painter.pen()
             pen.setColor(border_color)
-            pen.setWidth(SHELF_BORDER_WIDTH)
+            pen.setWidth(self.border_width)
             painter.setPen(pen)
             painter.drawPath(path)
         
@@ -164,6 +166,9 @@ class MainWindow(QWidget):
         self._screen_geometry_cache_key = None
         self._chip_position_animation_group = None
         self._chip_position_targets = {}
+        self.theme_manager = ThemeManager()
+        self.theme_name = self._load_theme_name()
+        self.theme = self.theme_manager.get_theme(self.theme_name)
         self.show_on_hover_enabled = SHELF_SHOW_ON_HOVER
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
@@ -173,14 +178,19 @@ class MainWindow(QWidget):
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
         self.max_chips = MAX_CHIPS
-        self.shelf_width_ratio = SHELF_WIDTH_RATIO
+        shelf_theme = self.theme.get("shelf", {})
+        self.shelf_width_ratio = float(shelf_theme.get("width_ratio", SHELF_WIDTH_RATIO))
         self._next_chip_number = 1
         self._settings_dialog = None
         self._shadow_margin = max(
             0,
-            int(SHELF_SHADOW_BLUR_RADIUS * 2 + max(abs(value) for value in SHELF_SHADOW_OFFSET)),
+            int(
+                float(shelf_theme.get("shadow_blur_radius", 10)) * 2
+                + max(abs(value) for value in shelf_theme.get("shadow_offset", [0, 2]))
+            ),
         )
         self._load_context_menu_settings()
+        self._save_context_menu_settings()
 
         # Refresh an existing Run entry. Older versions used sys.argv[0] for
         # source launches, which can contain launcher arguments (for example
@@ -240,8 +250,7 @@ class MainWindow(QWidget):
         self.hotkey_timer.timeout.connect(self.check_toggle_hotkey)
         self.hotkey_timer.start(50)
 
-        # Apply native Windows Acrylic theme
-        # from ui.styles import apply_acrylic
+        self._apply_theme(self.theme_name)
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -253,16 +262,20 @@ class MainWindow(QWidget):
         )
         main_layout.setSpacing(0)
 
-        self.container = ShelfContainer()
+        self.container = ShelfContainer(self.theme)
         # Background is drawn in ShelfContainer.paintEvent(), so keep widget background unset
         self.container.setStyleSheet("")
 
+        shelf_theme = self.theme.get("shelf", {})
+        shelf_padding = shelf_theme.get("padding", [9, 0, 9, 0])
         container_layout = QVBoxLayout(self.container)
-        container_layout.setContentsMargins(*SHELF_PADDING)
-        container_layout.setSpacing(SHELF_SPACING)
+        container_layout.setContentsMargins(*shelf_padding)
+        container_layout.setSpacing(int(shelf_theme.get("spacing", 5)))
 
-        self.scroll = ChipBar()
-        self.scroll.setFixedHeight(SHELF_HEIGHT - SHELF_PADDING[1] - SHELF_PADDING[3])
+        self.scroll = ChipBar(self.theme)
+        self.scroll.setFixedHeight(
+            int(shelf_theme.get("height", 52)) - int(shelf_padding[1]) - int(shelf_padding[3])
+        )
 
         scroll_widget = QWidget()
         scroll_widget.setStyleSheet("background: transparent;")
@@ -274,34 +287,36 @@ class MainWindow(QWidget):
         container_layout.addWidget(self.scroll)
 
         main_layout.addWidget(self.container)
+        empty_theme = self.theme.get("empty", {})
         self.empty_state_widget = QWidget()
         self.empty_state_widget.setStyleSheet("background: transparent;")
         self.empty_state_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.empty_state_layout = QHBoxLayout(self.empty_state_widget)
         self.empty_state_layout.setContentsMargins(
-            EMPTY_STATE_LEFT_PADDING,
+            int(empty_theme.get("left_padding", 15)),
             0,
-            EMPTY_STATE_PADDING[1],
+            int(empty_theme.get("padding", [5, 12])[1]),
             0,
         )
-        self.empty_state_layout.setSpacing(EMPTY_STATE_ICON_SPACING)
+        self.empty_state_layout.setSpacing(int(empty_theme.get("icon_spacing", 5)))
 
         self.empty_state_icon = QLabel()
         self.empty_state_icon.setAlignment(Qt.AlignCenter)
-        self.empty_state_icon.setFixedSize(EMPTY_STATE_ICON_SIZE, EMPTY_STATE_ICON_SIZE)
-        self.empty_state_icon.setVisible(EMPTY_STATE_ICON_ENABLED)
-        if EMPTY_STATE_ICON_ENABLED:
-            icon_path = Path(EMPTY_STATE_ICON_PATH)
+        icon_size = int(empty_theme.get("icon_size", 22))
+        self.empty_state_icon.setFixedSize(icon_size, icon_size)
+        self.empty_state_icon.setVisible(bool(empty_theme.get("icon_enabled", True)))
+        if empty_theme.get("icon_enabled", True):
+            icon_path = Path(empty_theme.get("icon_path", "assets/icons/clear.svg"))
             if not icon_path.is_absolute():
                 icon_path = Path(__file__).resolve().parent.parent / icon_path
             renderer = QSvgRenderer(str(icon_path))
             if renderer.isValid():
-                icon_pixmap = QPixmap(EMPTY_STATE_ICON_SIZE, EMPTY_STATE_ICON_SIZE)
+                icon_pixmap = QPixmap(icon_size, icon_size)
                 icon_pixmap.fill(Qt.transparent)
                 icon_painter = QPainter(icon_pixmap)
                 renderer.render(icon_painter)
                 icon_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-                icon_painter.fillRect(icon_pixmap.rect(), parse_color(EMPTY_STATE_ICON_COLOR))
+                icon_painter.fillRect(icon_pixmap.rect(), parse_color(empty_theme.get("icon_color", "rgba(100, 100, 100, 1)")))
                 icon_painter.end()
                 self.empty_state_icon.setPixmap(icon_pixmap)
             else:
@@ -309,15 +324,15 @@ class MainWindow(QWidget):
 
         self.empty_state_layout.addWidget(self.empty_state_icon)
 
-        self.empty_label = QLabel(EMPTY_STATE_TEXT)
+        self.empty_label = QLabel(empty_theme.get("text", "Nothing Here"))
         self.empty_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.empty_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.empty_label.setStyleSheet(f"""
             QLabel {{
-                color: {EMPTY_STATE_TEXT_COLOR};
-                font-size: {EMPTY_STATE_FONT_SIZE}px;
-                font-weight: {EMPTY_STATE_FONT_WEIGHT};
-                padding: {EMPTY_STATE_PADDING[0]}px 0px;
+                color: {empty_theme.get("text_color", "rgba(100, 100, 100, 1)")};
+                font-size: {empty_theme.get("font_size", 17)}px;
+                font-weight: {empty_theme.get("font_weight", 600)};
+                padding: {empty_theme.get("padding", [5, 12])[0]}px 0px;
             }}
         """)
         self.empty_state_layout.addWidget(self.empty_label)
@@ -352,6 +367,7 @@ class MainWindow(QWidget):
             self.chip_min_width,
             self.chip_max_width,
             color_preview_enabled=self.color_preview_enabled,
+            theme=self.theme,
         )
         self._assign_chip_number(chip)
         chip.paste_requested.connect(self.paste_clip)
@@ -718,6 +734,65 @@ class MainWindow(QWidget):
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         return settings_path
 
+    def _load_theme_name(self):
+        settings_path = self._context_menu_settings_path()
+        if not settings_path.exists():
+            return "dark"
+        try:
+            with settings_path.open("r", encoding="utf-8") as settings_file:
+                return self.theme_manager.get_theme(json.load(settings_file).get("theme", "dark"))["name"]
+        except Exception:
+            return "dark"
+
+    def _apply_theme(self, theme_name):
+        self.theme_name = self.theme_manager.get_theme(theme_name)["name"]
+        self.theme = self.theme_manager.get_theme(self.theme_name)
+        set_active_theme(self.theme_name)
+        if hasattr(self, "container"):
+            self.container.set_theme(self.theme)
+        for chip in self.chips_by_content.values():
+            chip.set_theme(self.theme)
+        if hasattr(self, "empty_label"):
+            self._apply_empty_theme()
+        if self._settings_dialog is not None:
+            self._settings_dialog.set_theme(self.theme)
+
+    def _apply_empty_theme(self):
+        empty_theme = self.theme.get("empty", {})
+        self.empty_label.setText(empty_theme.get("text", "Nothing Here"))
+        self.empty_label.setStyleSheet(f"""
+            QLabel {{
+                color: {empty_theme.get("text_color", "rgba(100, 100, 100, 1)")};
+                font-size: {empty_theme.get("font_size", 17)}px;
+                font-weight: {empty_theme.get("font_weight", 600)};
+                padding: {empty_theme.get("padding", [5, 12])[0]}px 0px;
+            }}
+        """)
+        if empty_theme.get("icon_enabled", True) and self.empty_state_icon.isVisible():
+            icon_path = Path(empty_theme.get("icon_path", "assets/icons/clear.svg"))
+            if not icon_path.is_absolute():
+                icon_path = Path(__file__).resolve().parent.parent / icon_path
+            renderer = QSvgRenderer(str(icon_path))
+            if renderer.isValid():
+                icon_size = int(empty_theme.get("icon_size", 22))
+                pixmap = QPixmap(icon_size, icon_size)
+                pixmap.fill(Qt.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                painter.fillRect(pixmap.rect(), parse_color(empty_theme.get("icon_color", "rgba(100, 100, 100, 1)")))
+                painter.end()
+                self.empty_state_icon.setPixmap(pixmap)
+
+    def set_theme(self, theme_name):
+        theme_name = self.theme_manager.get_theme(theme_name)["name"]
+        if theme_name == self.theme_name:
+            return
+        self.theme_name = theme_name
+        self.theme = self.theme_manager.get_theme(theme_name)
+        self._apply_theme(theme_name)
+        self._save_context_menu_settings()
+
     def _load_context_menu_settings(self):
         settings_path = self._context_menu_settings_path()
         if not settings_path.exists():
@@ -735,10 +810,13 @@ class MainWindow(QWidget):
             self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
             self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
+            self.theme_name = self.theme_manager.get_theme(settings.get("theme", self.theme_name))["name"]
+            self.theme = self.theme_manager.get_theme(self.theme_name)
             self.max_chips = max(
                 MAX_CHIPS_MIN,
                 min(MAX_CHIPS_MAX, int(settings.get("max_chips", self.max_chips))),
             )
+            chip_theme = self.theme.get("chip", {})
             if needs_sizing_defaults_migration:
                 self.chip_min_width = CHIP_MIN_WIDTH
                 self.chip_max_width = CHIP_MAX_WIDTH
@@ -777,6 +855,7 @@ class MainWindow(QWidget):
                         "chip_max_width": self.chip_max_width,
                         "max_chips": self.max_chips,
                         "shelf_width_ratio": self.shelf_width_ratio,
+                        "theme": self.theme_name,
                         "chip_width_defaults_version": CHIP_WIDTH_DEFAULTS_VERSION,
                     },
                     settings_file,
@@ -795,14 +874,7 @@ class MainWindow(QWidget):
         tray_menu.addSeparator()
         tray_menu.addAction("Exit", self.exit_application)
         self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
-
-    def toggle_shelf_from_tray(self):
-        if self.is_open:
-            self.hide_shelf(force=True)
-        else:
-            self.show_shelf("cursor")
 
     def exit_application(self, checked=False):
         # Closing normally hides the shelf when close-to-tray is enabled.
@@ -810,10 +882,6 @@ class MainWindow(QWidget):
         self.close_to_tray_enabled = False
         self.tray_icon.hide()
         self.close()
-
-    def _on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
-            self.toggle_shelf_from_tray()
 
     def open_settings(self):
         if self._settings_dialog is not None and self._settings_dialog.isVisible():
@@ -832,6 +900,9 @@ class MainWindow(QWidget):
             chip_max_width=self.chip_max_width,
             max_chips=self.max_chips,
             shelf_width_ratio=self.shelf_width_ratio,
+            theme_name=self.theme_name,
+            available_themes=self.theme_manager.available_themes(),
+            theme=self.theme,
             on_show_on_hover=self.set_show_on_hover_enabled,
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
@@ -842,6 +913,7 @@ class MainWindow(QWidget):
             on_chip_max_width=self.set_chip_max_width,
             on_max_chips=self.set_max_chips,
             on_shelf_width_ratio=self.set_shelf_width_ratio,
+            on_theme=self.set_theme,
             parent=None,
         )
         self._settings_dialog.setWindowIcon(self.tray_icon.icon())
@@ -853,10 +925,9 @@ class MainWindow(QWidget):
         self._save_context_menu_settings()
 
     def set_chip_min_width(self, width):
-        self.chip_min_width = max(
-            CHIP_WIDTH_MIN_LIMIT,
-            min(CHIP_WIDTH_MAX_LIMIT, int(width)),
-        )
+        minimum = CHIP_WIDTH_MIN_LIMIT
+        maximum = CHIP_WIDTH_MAX_LIMIT
+        self.chip_min_width = max(minimum, min(maximum, int(width)))
         if self.chip_min_width > self.chip_max_width:
             self.chip_max_width = self.chip_min_width
             if self._settings_dialog is not None:
@@ -866,10 +937,9 @@ class MainWindow(QWidget):
         self._apply_chip_width_settings()
 
     def set_chip_max_width(self, width):
-        self.chip_max_width = max(
-            CHIP_WIDTH_MIN_LIMIT,
-            min(CHIP_WIDTH_MAX_LIMIT, int(width)),
-        )
+        minimum = CHIP_WIDTH_MIN_LIMIT
+        maximum = CHIP_WIDTH_MAX_LIMIT
+        self.chip_max_width = max(minimum, min(maximum, int(width)))
         if self.chip_max_width < self.chip_min_width:
             self.chip_min_width = self.chip_max_width
             if self._settings_dialog is not None:
@@ -1138,13 +1208,15 @@ class MainWindow(QWidget):
         width = max(720, int(geometry.width() * self.shelf_width_ratio))
         width = min(width, geometry.width() - 32)
 
+        shelf_height = int(self.theme.get("shelf", {}).get("height", 52))
+        shelf_top_margin = int(self.theme.get("shelf", {}).get("top_margin", 6))
         window_width = width + self._shadow_margin * 2
-        window_height = SHELF_HEIGHT + self._shadow_margin * 2
+        window_height = shelf_height + self._shadow_margin * 2
         if self.width() != window_width or self.height() != window_height:
             self.resize(window_width, window_height)
 
         x = geometry.left() + (geometry.width() - width) // 2 - self._shadow_margin
-        y = geometry.top() + SHELF_TOP_MARGIN - self._shadow_margin
+        y = geometry.top() + shelf_top_margin - self._shadow_margin
         self.screen_geometry = geometry
         self.full_screen_geometry = full_geometry
         self.open_pos = QPoint(x, y)

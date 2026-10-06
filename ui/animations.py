@@ -2,7 +2,7 @@ from PySide6.QtCore import QPoint, QParallelAnimationGroup, QPropertyAnimation, 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsOpacityEffect
 
-from config import MOTION_ENABLED
+from animation_config import MOTION_ENABLED
 
 
 def remember_animation(widget, animation):

@@ -34,60 +34,12 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from ui.theme_manager import get_theme_value
 from config import (
-    CHIP_BORDER_RADIUS,
-    CHIP_BORDER_WIDTH,
-    CHIP_BORDER_COLOR,
-    CHIP_HOVER_BORDER_COLOR,
-    CHIP_PINNED_BORDER_COLOR,
-    CHIP_DEFAULT_BACKGROUND,
-    CHIP_HOVER_BACKGROUND,
-    CHIP_PINNED_BACKGROUND,
-    CHIP_PADDING,
-    CHIP_SPACING,
-    CHIP_TEXT_COLOR,
-    CHIP_TEXT_FONT_SIZE,
     CHIP_MAX_WIDTH,
     CHIP_MIN_WIDTH,
-    CHIP_HEIGHT,
     COLOR_PREVIEW_ENABLED,
-    COLOR_PREVIEW_SWATCH_BORDER_COLOR,
-    COLOR_PREVIEW_SWATCH_BORDER_WIDTH,
-    COLOR_PREVIEW_SWATCH_SIZE,
     clip_indexing,
-    CLIP_INDEX_FONT_SIZE,
-    CLIP_INDEX_FONT_WEIGHT,
-    CLIP_INDEX_TEXT_COLOR,
-    CHIP_CONTEXT_MENU_BACKGROUND_COLOR,
-    CHIP_CONTEXT_MENU_ICON_COLOR,
-    CHIP_CONTEXT_MENU_BORDER_COLOR,
-    CHIP_CONTEXT_MENU_HOVER_COLOR,
-    CHIP_CONTEXT_MENU_BORDER_WIDTH,
-    CHIP_CONTEXT_MENU_BORDER_RADIUS,
-    CHIP_CONTEXT_MENU_PADDING,
-    CHIP_CONTEXT_MENU_ITEM_SIZE,
-    CHIP_CONTEXT_MENU_ITEM_PADDING,
-    CHIP_CONTEXT_MENU_ITEM_MARGIN,
-    CHIP_CONTEXT_MENU_ITEM_BORDER_RADIUS,
-    CHIP_CONTEXT_MENU_ICON_SIZE,
-    CHIP_CONTEXT_MENU_ICON_STROKE_WIDTH,
-    CHIP_CONTEXT_MENU_DESTRUCTIVE_ICON_COLOR,
-    CHIP_CONTEXT_MENU_PIN_ICON,
-    CHIP_CONTEXT_MENU_UNPIN_ICON,
-    CHIP_CONTEXT_MENU_COPY_ICON,
-    CHIP_CONTEXT_MENU_DELETE_ICON,
-    CHIP_CONTEXT_MENU_CLEAR_ICON,
-    OPEN_ICON_PATH,
-    FOLDER_ICON_PATH,
-    FILE_ICON_PATH,
-    OPEN_ICON_SIZE,
-    FOLDER_ICON_SIZE,
-    OPEN_ICON_COLOR,
-    FOLDER_ICON_COLOR,
-    THUMBNAIL_BORDER_RADIUS,
-    THUMBNAIL_SHADOW_BLUR_RADIUS,
-    THUMBNAIL_SHADOW_OFFSET,
-    THUMBNAIL_SHADOW_COLOR,
 )
 from core.favicon_service import get_favicon_service
 from utils.app_logging import log_exception, safe_slot
@@ -98,24 +50,27 @@ from ui.animations import (
 
 
 class ChipContextMenu(QMenu):
+    def __init__(self, parent=None, theme=None):
+        super().__init__(parent)
+        self.theme = theme or {"context_menu": {}}
+
     def _effective_corner_radius(self):
+        radius = float(self.theme.get("context_menu", {}).get("border_radius", 50))
         if self.width() <= 0 or self.height() <= 0:
-            return CHIP_CONTEXT_MENU_BORDER_RADIUS
-        return min(
-            CHIP_CONTEXT_MENU_BORDER_RADIUS,
-            self.width() / 2,
-            self.height() / 2,
-        )
+            return radius
+        return min(radius, self.width() / 2, self.height() / 2)
 
     def _apply_menu_shape(self):
         if self.width() <= 0 or self.height() <= 0:
             return
         radius = self._effective_corner_radius()
+        menu_theme = self.theme.get("context_menu", {})
         self.setStyleSheet(f'''
             QMenu {{
-                background: transparent;
+                background: {menu_theme.get('background', 'rgba(20, 20, 20, 1)')};
+                color: {menu_theme.get('text', 'rgba(200, 200, 200, 1)')};
                 border: none;
-                padding: {CHIP_CONTEXT_MENU_PADDING}px;
+                padding: {menu_theme.get('padding', 6)}px;
             }}
         ''')
 
@@ -128,6 +83,7 @@ class ChipContextMenu(QMenu):
             super().paintEvent(event)
             return
 
+        menu_theme = self.theme.get("context_menu", {})
         outer_radius = self._effective_corner_radius()
         background_path = QPainterPath()
         background_path.addRoundedRect(self.rect(), outer_radius, outer_radius)
@@ -135,13 +91,13 @@ class ChipContextMenu(QMenu):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(parse_color(CHIP_CONTEXT_MENU_BACKGROUND_COLOR))
+        painter.setBrush(parse_color(menu_theme.get("background", "rgba(20, 20, 20, 1)")))
         painter.drawPath(background_path)
         painter.end()
 
         super().paintEvent(event)
 
-        border_width = CHIP_CONTEXT_MENU_BORDER_WIDTH
+        border_width = float(menu_theme.get("border_width", 1.2))
         if border_width <= 0:
             return
 
@@ -155,10 +111,15 @@ class ChipContextMenu(QMenu):
         )
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(parse_color(CHIP_CONTEXT_MENU_BORDER_COLOR), border_width))
+        painter.setPen(QPen(parse_color(menu_theme.get("border", "rgba(200, 200, 200, 0.09)")), border_width))
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(border_path)
         painter.end()
+
+    def set_theme(self, theme):
+        self.theme = theme
+        self._apply_menu_shape()
+        self.update()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -181,17 +142,20 @@ class ChipWidget(QWidget):
     def __init__(
         self,
         content,
-        min_width=CHIP_MIN_WIDTH,
-        max_width=CHIP_MAX_WIDTH,
-        color_preview_enabled=COLOR_PREVIEW_ENABLED,
+        min_width=None,
+        max_width=None,
+        color_preview_enabled=None,
+        theme=None,
     ):
         super().__init__()
 
         self.content = content
-        self.min_width = min_width
-        self.max_width = max(max_width, min_width)
+        self.theme = theme or {"chip": {}}
+        self.min_width = int(min_width) if min_width is not None else CHIP_MIN_WIDTH
+        self.max_width = int(max_width) if max_width is not None else CHIP_MAX_WIDTH
+        self.max_width = max(self.max_width, self.min_width)
+        self.color_preview_enabled = bool(color_preview_enabled) if color_preview_enabled is not None else COLOR_PREVIEW_ENABLED
         self.clip_index = None
-        self.color_preview_enabled = bool(color_preview_enabled)
         self.kind = self.detect_kind()
         self.pinned = False
         self.network = None
@@ -203,7 +167,9 @@ class ChipWidget(QWidget):
         self._favicon_pixmap = QPixmap()
         self.setObjectName("chip")
 
-        self.setFixedHeight(CHIP_HEIGHT)
+        chip_theme = self.theme.get("chip", {})
+        self._chip_height = int(chip_theme.get("height", 32))
+        self.setFixedHeight(self._chip_height)
         self.setMinimumWidth(self.min_width)
         self.setMaximumWidth(self.max_width)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -212,7 +178,7 @@ class ChipWidget(QWidget):
         self.customContextMenuRequested.connect(self.show_context_menu)
 
         self._base_width = self.min_width
-        self._base_height = CHIP_HEIGHT
+        self._base_height = self._chip_height
 
         self.setup_ui()
         self.apply_style()
@@ -231,38 +197,41 @@ class ChipWidget(QWidget):
 
     def setup_ui(self):
         self.setAttribute(Qt.WA_StyledBackground, True)
+        chip_theme = self.theme.get("chip", {})
 
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(*CHIP_PADDING)
-        self.layout.setSpacing(CHIP_SPACING)
+        self.layout.setContentsMargins(*chip_theme.get("padding", [10, 0, 10, 0]))
+        self.layout.setSpacing(int(chip_theme.get("spacing", 8)))
 
         self.index_label = QLabel()
         self.index_label.setAlignment(Qt.AlignCenter)
         self.index_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.index_label.setStyleSheet(f"""
             QLabel {{
-                color: {CLIP_INDEX_TEXT_COLOR};
-                font-size: {CLIP_INDEX_FONT_SIZE}px;
-                font-weight: {CLIP_INDEX_FONT_WEIGHT};
+                color: {chip_theme.get("index", "rgba(150, 150, 150, 0.7)")};
+                font-size: {chip_theme.get("index_font_size", 11)}px;
+                font-weight: {chip_theme.get("index_font_weight", 700)};
             }}
         """)
         self.index_label.hide()
 
         self.icon = QLabel()
-        self.icon.setFixedSize(18, 18)
+        icon_size = int(chip_theme.get("icon_size", 18))
+        self.icon.setFixedSize(icon_size, icon_size)
         self.icon.setAlignment(Qt.AlignCenter)
         self.icon.setStyleSheet(f"""
             QLabel {{
-                color: {CHIP_TEXT_COLOR};
-                font-size: 11px;
+                color: {chip_theme.get("icon_color", "rgba(200, 200, 200, 1)")};
+                font-size: {chip_theme.get("icon_font_size", 11)}px;
                 font-weight: 800;
             }}
         """)
-        if THUMBNAIL_SHADOW_BLUR_RADIUS > 0:
+        thumbnail = chip_theme.get("thumbnail", {})
+        if int(thumbnail.get("shadow_blur_radius", 3)) > 0:
             thumbnail_shadow = QGraphicsDropShadowEffect(self.icon)
-            thumbnail_shadow.setBlurRadius(THUMBNAIL_SHADOW_BLUR_RADIUS)
-            thumbnail_shadow.setOffset(*THUMBNAIL_SHADOW_OFFSET)
-            thumbnail_shadow.setColor(parse_color(THUMBNAIL_SHADOW_COLOR))
+            thumbnail_shadow.setBlurRadius(int(thumbnail.get("shadow_blur_radius", 3)))
+            thumbnail_shadow.setOffset(*thumbnail.get("shadow_offset", [0, 1]))
+            thumbnail_shadow.setColor(parse_color(thumbnail.get("shadow_color", "rgba(0, 0, 0, 0.45)")))
             self.icon.setGraphicsEffect(thumbnail_shadow)
 
         self.title = QLabel()
@@ -270,14 +239,15 @@ class ChipWidget(QWidget):
         self.title.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.title.setStyleSheet(f"""
             QLabel {{
-                color: {CHIP_TEXT_COLOR};
-                font-size: {CHIP_TEXT_FONT_SIZE}px;
-                font-weight: 600;
+                color: {chip_theme.get("text", "rgba(200, 200, 200, 1)")};
+                font-size: {chip_theme.get("font_size", 15)}px;
+                font-weight: {chip_theme.get("font_weight", 600)};
             }}
         """)
 
         self.open_icon = QLabel()
-        self.open_icon.setFixedSize(OPEN_ICON_SIZE, OPEN_ICON_SIZE)
+        open_icon_size = int(chip_theme.get("open_icon_size", 18))
+        self.open_icon.setFixedSize(open_icon_size, open_icon_size)
         self.open_icon.setAlignment(Qt.AlignCenter)
         self.open_icon.setCursor(Qt.PointingHandCursor)
         self.open_icon.setPixmap(self.load_open_icon_pixmap())
@@ -290,21 +260,50 @@ class ChipWidget(QWidget):
         self.layout.addWidget(self.open_icon)
 
     def apply_style(self):
-        border_color = CHIP_PINNED_BORDER_COLOR if self.pinned else (CHIP_HOVER_BORDER_COLOR if self._is_hovered else CHIP_BORDER_COLOR)
-        background_color = (
-            CHIP_PINNED_BACKGROUND
-            if self.pinned
-            else CHIP_HOVER_BACKGROUND
-            if self._is_hovered
-            else CHIP_DEFAULT_BACKGROUND
+        chip_theme = self.theme.get("chip", {})
+        border_color = chip_theme.get("border", "rgba(200, 200, 200, 0.09)")
+        if self.pinned:
+            border_color = chip_theme.get("pinned_border", border_color)
+        elif self._is_hovered:
+            border_color = chip_theme.get("hover_border", border_color)
+        background_color = chip_theme.get(
+            "pinned" if self.pinned else "hover" if self._is_hovered else "default",
+            "rgba(45, 45, 45, 1)" if self.pinned else "rgba(40, 40, 40, 1)" if self._is_hovered else "rgba(35, 35, 35, 1)",
         )
         self.setStyleSheet(f"""
             #chip {{
                 background-color: {color_to_rgba(background_color)};
-                border: {CHIP_BORDER_WIDTH}px solid {border_color};
-                border-radius: {CHIP_BORDER_RADIUS}px;
+                border: {chip_theme.get("border_width", 1)}px solid {border_color};
+                border-radius: {chip_theme.get("border_radius", 15)}px;
             }}
         """)
+
+    def set_theme(self, theme):
+        self.theme = theme
+        self.apply_style()
+        chip_theme = theme.get("chip", {})
+        self.title.setStyleSheet(f"""
+            QLabel {{
+                color: {chip_theme.get("text", "rgba(200, 200, 200, 1)")};
+                font-size: {chip_theme.get("font_size", 15)}px;
+                font-weight: {chip_theme.get("font_weight", 600)};
+            }}
+        """)
+        self.index_label.setStyleSheet(f"""
+            QLabel {{
+                color: {chip_theme.get("index", "rgba(150, 150, 150, 0.7)")};
+                font-size: {chip_theme.get("index_font_size", 11)}px;
+                font-weight: {chip_theme.get("index_font_weight", 700)};
+            }}
+        """)
+        self.icon.setStyleSheet(f"""
+            QLabel {{
+                color: {chip_theme.get("icon_color", "rgba(200, 200, 200, 1)")};
+                font-size: {chip_theme.get("icon_font_size", 11)}px;
+                font-weight: 800;
+            }}
+        """)
+        self.apply_style()
 
     def set_hovered(self, hovered):
         hovered = bool(hovered)
@@ -343,6 +342,7 @@ class ChipWidget(QWidget):
     def update_label(self):
         text = self.display_text()
         metrics = QFontMetrics(self.title.font())
+        chip_theme = self.theme.get("chip", {})
         if self.kind == "IMG":
             self.icon.show()
             self.set_image_thumb()
@@ -358,7 +358,8 @@ class ChipWidget(QWidget):
                 self.icon.setPixmap(self._favicon_pixmap)
         elif self.kind == "PATH":
             self.icon.show()
-            self.icon.setFixedSize(FOLDER_ICON_SIZE, FOLDER_ICON_SIZE)
+            icon_size = int(chip_theme.get("folder_icon_size", 22))
+            self.icon.setFixedSize(icon_size, icon_size)
             self.icon.setPixmap(self.load_path_icon_pixmap())
         else:
             self.icon.hide()
@@ -368,8 +369,8 @@ class ChipWidget(QWidget):
             if not widget.isHidden()
         ]
         margins = self.layout.contentsMargins()
-        fixed_width = margins.left() + margins.right() + 2 * CHIP_BORDER_WIDTH
-        fixed_width += CHIP_SPACING * max(0, len(visible_widgets) - 1)
+        fixed_width = margins.left() + margins.right() + 2 * int(chip_theme.get("border_width", 1))
+        fixed_width += int(chip_theme.get("spacing", 8)) * max(0, len(visible_widgets) - 1)
         fixed_width += sum(
             widget.sizeHint().width()
             for widget in visible_widgets
@@ -437,8 +438,9 @@ class ChipWidget(QWidget):
         if color is None:
             return
 
-        size = max(1, int(COLOR_PREVIEW_SWATCH_SIZE))
-        border_width = max(0, int(COLOR_PREVIEW_SWATCH_BORDER_WIDTH))
+        chip_theme = self.theme.get("chip", {})
+        size = max(1, int(chip_theme.get("color_preview_size", 22)))
+        border_width = max(0, int(chip_theme.get("color_preview_border_width", 1)))
         self.icon.setFixedSize(size, size)
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
@@ -451,7 +453,7 @@ class ChipWidget(QWidget):
             -border_width / 2,
         )
         if border_width:
-            painter.setPen(QPen(parse_color(COLOR_PREVIEW_SWATCH_BORDER_COLOR), border_width))
+            painter.setPen(QPen(parse_color(chip_theme.get("color_preview_border_color", "rgba(255, 255, 255, 0.25)")), border_width))
         else:
             painter.setPen(Qt.NoPen)
         painter.setBrush(color)
@@ -481,7 +483,12 @@ class ChipWidget(QWidget):
             self.icon.setText("I")
             return
 
-        thumb_size = QSize(26, 22)
+        chip_theme = self.theme.get("chip", {})
+        thumbnail = chip_theme.get("thumbnail", {})
+        thumb_size = QSize(
+            int(thumbnail.get("width", 26)),
+            int(thumbnail.get("height", 22)),
+        )
         scaled = pixmap.scaled(thumb_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
         rounded = QPixmap(thumb_size)
         rounded.fill(Qt.transparent)
@@ -489,7 +496,14 @@ class ChipWidget(QWidget):
         painter = QPainter(rounded)
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(0, 0, thumb_size.width(), thumb_size.height(), THUMBNAIL_BORDER_RADIUS, THUMBNAIL_BORDER_RADIUS)
+        path.addRoundedRect(
+            0,
+            0,
+            thumb_size.width(),
+            thumb_size.height(),
+            int(thumbnail.get("border_radius", 4)),
+            int(thumbnail.get("border_radius", 4)),
+        )
         painter.setClipPath(path)
         painter.drawPixmap(0, 0, scaled)
         painter.end()
@@ -634,19 +648,22 @@ class ChipWidget(QWidget):
             return
 
         pixmap = QPixmap()
+        chip_theme = self.theme.get("chip", {})
+        favicon_size = int(chip_theme.get("favicon_size", 22))
         if pixmap.loadFromData(data) and not pixmap.isNull():
             self._favicon_pixmap = pixmap.scaled(
-                22,
-                22,
+                favicon_size,
+                favicon_size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
             self.icon.setText("")
-            self.icon.setFixedSize(22, 22)
+            self.icon.setFixedSize(favicon_size, favicon_size)
             self.icon.setPixmap(self._favicon_pixmap)
 
     def external_link_icon(self, color):
-        size = OPEN_ICON_SIZE if 'OPEN_ICON_SIZE' in globals() else 20
+        chip_theme = self.theme.get("chip", {})
+        size = int(chip_theme.get("open_icon_size", 18))
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
 
@@ -738,18 +755,26 @@ class ChipWidget(QWidget):
         return tinted
 
     def load_open_icon_pixmap(self):
-        pix = self._load_icon_pixmap(OPEN_ICON_PATH, OPEN_ICON_SIZE, self.parse_css_color(OPEN_ICON_COLOR))
+        chip_theme = self.theme.get("chip", {})
+        icon_path = chip_theme.get("open_icon_path", "assets/icons/open_link.svg")
+        icon_size = int(chip_theme.get("open_icon_size", 18))
+        icon_color = self.parse_css_color(chip_theme.get("open_icon_color", "rgba(150, 150, 150, 1)"))
+        pix = self._load_icon_pixmap(icon_path, icon_size, icon_color)
         if not pix.isNull():
             return pix
-        return self.external_link_icon(self.parse_css_color(OPEN_ICON_COLOR))
+        return self.external_link_icon(icon_color)
 
     def load_folder_icon_pixmap(self):
-        pix = self._load_icon_pixmap(FOLDER_ICON_PATH, FOLDER_ICON_SIZE, self.parse_css_color(FOLDER_ICON_COLOR))
+        chip_theme = self.theme.get("chip", {})
+        icon_path = chip_theme.get("folder_icon_path", "assets/icons/folder.svg")
+        icon_size = int(chip_theme.get("folder_icon_size", 22))
+        icon_color = self.parse_css_color(chip_theme.get("folder_icon_color", "rgba(200, 200, 200, 1)"))
+        pix = self._load_icon_pixmap(icon_path, icon_size, icon_color)
         if not pix.isNull():
             return pix
 
         # draw a simple folder glyph
-        size = FOLDER_ICON_SIZE
+        size = icon_size
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -766,11 +791,16 @@ class ChipWidget(QWidget):
         return pixmap
 
     def load_path_icon_pixmap(self):
-        icon_path = FOLDER_ICON_PATH if os.path.isdir(self.content) else FILE_ICON_PATH
-        pix = self._load_icon_pixmap(icon_path, FOLDER_ICON_SIZE, self.parse_css_color(FOLDER_ICON_COLOR))
+        chip_theme = self.theme.get("chip", {})
+        icon_size = int(chip_theme.get("folder_icon_size", 22))
+        icon_color = self.parse_css_color(chip_theme.get("folder_icon_color", "rgba(200, 200, 200, 1)"))
+        folder_path = chip_theme.get("folder_icon_path", "assets/icons/folder.svg")
+        file_path = chip_theme.get("file_icon_path", "assets/icons/file.svg")
+        icon_path = folder_path if os.path.isdir(self.content) else file_path
+        pix = self._load_icon_pixmap(icon_path, icon_size, icon_color)
         if not pix.isNull():
             return pix
-        return self._load_icon_pixmap(FOLDER_ICON_PATH, FOLDER_ICON_SIZE, self.parse_css_color(FOLDER_ICON_COLOR))
+        return self._load_icon_pixmap(folder_path, icon_size, icon_color)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -807,23 +837,24 @@ class ChipWidget(QWidget):
         super().leaveEvent(event)
 
     def show_context_menu(self, position):
-        menu = ChipContextMenu(self)
+        menu = ChipContextMenu(self, self.theme)
         menu.setWindowFlags(
             menu.windowFlags()
             | Qt.FramelessWindowHint
             | Qt.NoDropShadowWindowHint
         )
         menu.setAttribute(Qt.WA_TranslucentBackground)
+        menu_theme = self.theme.get("context_menu", {})
 
         def make_menu_icon(paths, color):
+            icon_size = max(1, int(menu_theme.get("icon_size", 18)))
             svg = (
-                f'<svg xmlns="http://www.w3.org/2000/svg" width="{CHIP_CONTEXT_MENU_ICON_SIZE}" '
-                'height="24" viewBox="0 0 24 24">'
-                f'<g fill="none" stroke="{color}" stroke-width="{CHIP_CONTEXT_MENU_ICON_STROKE_WIDTH}" '
+                f'<svg xmlns="http://www.w3.org/2000/svg" width="{icon_size}" '
+                f'height="{icon_size}" viewBox="0 0 24 24">'
+                f'<g fill="none" stroke="{color}" stroke-width="{menu_theme.get("icon_stroke_width", 1)}" '
                 f'stroke-linecap="round" stroke-linejoin="round">{paths}</g></svg>'
             )
             renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
-            icon_size = max(1, CHIP_CONTEXT_MENU_ICON_SIZE)
             pixmap = QPixmap(icon_size, icon_size)
             pixmap.fill(Qt.transparent)
             painter = QPainter(pixmap)
@@ -831,32 +862,35 @@ class ChipWidget(QWidget):
             painter.end()
             return QIcon(pixmap)
 
-        normal_icon_color = parse_color(CHIP_CONTEXT_MENU_ICON_COLOR).name()
-        destructive_icon_color = CHIP_CONTEXT_MENU_DESTRUCTIVE_ICON_COLOR
-        pin_icon = CHIP_CONTEXT_MENU_UNPIN_ICON if self.pinned else CHIP_CONTEXT_MENU_PIN_ICON
+        normal_icon_color = parse_color(menu_theme.get("icon_color", "rgba(200, 200, 200, 1)")).name()
+        destructive_icon_color = menu_theme.get("destructive_icon_color", "#e58a83")
+        pin_icon = menu_theme.get("unpin_icon", menu_theme.get("pin_icon", "")) if self.pinned else menu_theme.get("pin_icon", "")
 
         def add_icon_action(icon, callback):
             action = QWidgetAction(menu)
 
-            row_size = CHIP_CONTEXT_MENU_ITEM_SIZE + 2 * CHIP_CONTEXT_MENU_ITEM_PADDING
+            item_size = int(menu_theme.get("item_size", 16))
+            item_padding = int(menu_theme.get("item_padding", 5))
+            item_margin = int(menu_theme.get("item_margin", 2))
+            row_size = item_size + 2 * item_padding
             button = QToolButton(menu)
             button.setFixedSize(
-                row_size + 2 * CHIP_CONTEXT_MENU_ITEM_MARGIN,
-                row_size + 2 * CHIP_CONTEXT_MENU_ITEM_MARGIN,
+                row_size + 2 * item_margin,
+                row_size + 2 * item_margin,
             )
             button.setToolButtonStyle(Qt.ToolButtonIconOnly)
             button.setIcon(icon)
-            button.setIconSize(QSize(CHIP_CONTEXT_MENU_ICON_SIZE, CHIP_CONTEXT_MENU_ICON_SIZE))
+            button.setIconSize(QSize(int(menu_theme.get("icon_size", 18)), int(menu_theme.get("icon_size", 18))))
             button.setCursor(Qt.PointingHandCursor)
             button.setStyleSheet(f'''
                 QToolButton {{
                     background: transparent;
                     border: none;
-                    margin: {CHIP_CONTEXT_MENU_ITEM_MARGIN}px;
-                    border-radius: {CHIP_CONTEXT_MENU_ITEM_BORDER_RADIUS}px;
+                    margin: {item_margin}px;
+                    border-radius: {menu_theme.get("item_border_radius", 7)}px;
                 }}
                 QToolButton:hover, QToolButton:focus {{
-                    background-color: {CHIP_CONTEXT_MENU_HOVER_COLOR};
+                    background-color: {menu_theme.get("hover", "rgba(40, 40, 40, 0.9)")};
                 }}
             ''')
             action.setDefaultWidget(button)
@@ -878,15 +912,15 @@ class ChipWidget(QWidget):
 
         pin_action = add_icon_action(make_menu_icon(pin_icon, normal_icon_color), toggle_pin)
         copy_again_action = add_icon_action(
-            make_menu_icon(CHIP_CONTEXT_MENU_COPY_ICON, normal_icon_color),
+            make_menu_icon(menu_theme.get("copy_icon", ""), normal_icon_color),
             lambda: self.copy_again_requested.emit(self.content),
         )
         delete_action = add_icon_action(
-            make_menu_icon(CHIP_CONTEXT_MENU_DELETE_ICON, destructive_icon_color),
+            make_menu_icon(menu_theme.get("delete_icon", ""), destructive_icon_color),
             lambda: self.delete_requested.emit(self.content),
         )
         clear_all_action = add_icon_action(
-            make_menu_icon(CHIP_CONTEXT_MENU_CLEAR_ICON, destructive_icon_color),
+            make_menu_icon(menu_theme.get("clear_icon", ""), destructive_icon_color),
             lambda: self.clear_all_requested.emit(),
         )
 

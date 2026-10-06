@@ -3,12 +3,13 @@ from PySide6.QtGui import QCursor
 from PySide6.QtGui import QPainterPath, QRegion
 from PySide6.QtWidgets import QScrollArea, QSizePolicy, QWidget
 
-from config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS, SCROLL_VIEWPORT_BORDER_RADIUS
+from animation_config import MOTION_ENABLED, CHIP_SCROLL_SPEED, CHIP_SCROLL_DURATION_MS
 
 
 class ChipBar(QScrollArea):
-    def __init__(self):
+    def __init__(self, theme=None):
         super().__init__()
+        self.theme = theme or {"scroll_viewport": {"border_radius": 40}}
 
         self.setWidgetResizable(True)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -16,12 +17,12 @@ class ChipBar(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QScrollArea.NoFrame)
-        radius = str(SCROLL_VIEWPORT_BORDER_RADIUS)
+        radius = int(self.theme.get("scroll_viewport", {}).get("border_radius", 40))
         self.setStyleSheet(
             "QScrollArea { background: transparent; border: none; border-radius: "
-            + radius + "px; }"
+            + str(radius) + "px; }"
             "QScrollArea::viewport { background: transparent; border: none; border-radius: "
-            + radius + "px; }"
+            + str(radius) + "px; }"
             "QScrollBar { background: transparent; }"
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -29,7 +30,7 @@ class ChipBar(QScrollArea):
         self.viewport().setStyleSheet(
             "background: transparent;"
             "border: none;"
-            "border-radius: " + radius + "px;"
+            "border-radius: " + str(radius) + "px;"
         )
 
         self._scroll_value = 0.0
@@ -65,8 +66,9 @@ class ChipBar(QScrollArea):
             return
 
         rect = viewport.rect()
+        radius = int(self.theme.get("scroll_viewport", {}).get("border_radius", 40))
         path = QPainterPath()
-        path.addRoundedRect(rect, SCROLL_VIEWPORT_BORDER_RADIUS, SCROLL_VIEWPORT_BORDER_RADIUS)
+        path.addRoundedRect(rect, radius, radius)
         viewport.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     def _refresh_chip_hover(self):
