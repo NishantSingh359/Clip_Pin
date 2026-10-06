@@ -379,6 +379,7 @@ class MainWindow(QWidget):
         )
         self._assign_chip_number(chip)
         chip.paste_requested.connect(self.paste_clip)
+        chip.image_opening.connect(self.clipboard_manager.ignore_image_capture)
         chip.copy_again_requested.connect(self.copy_again_clip)
         chip.delete_requested.connect(self.remove_clip)
         chip.pin_requested.connect(self.pin_clip)

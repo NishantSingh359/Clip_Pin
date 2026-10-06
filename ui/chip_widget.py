@@ -5,7 +5,7 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QByteArray, Qt, QUrl, Signal, QPoint, QSize, QRectF, QMimeData, QBuffer, QIODevice
+from PySide6.QtCore import QByteArray, Qt, QUrl, Signal, QPoint, QSize, QRectF, QMimeData, QBuffer, QIODevice, QTimer
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -137,6 +137,7 @@ class ChipWidget(QWidget):
     pin_requested = Signal(str)
     clear_all_requested = Signal()
     context_action_triggered = Signal()
+    image_opening = Signal(str)
     favicon_loaded = Signal(bytes)
 
     def __init__(
@@ -164,6 +165,13 @@ class ChipWidget(QWidget):
         self._is_deleting = False
         self._drag_start_position = None
         self._dragging = False
+        self._suppress_next_release = False
+        self._image_click_timer = QTimer(self)
+        self._image_click_timer.setSingleShot(True)
+        # Keep the single-click paste pending until Qt has time to recognize a
+        # double-click, with a small margin for queued UI events.
+        self._image_click_timer.setInterval(QApplication.doubleClickInterval() + 50)
+        self._image_click_timer.timeout.connect(lambda: self.paste_requested.emit(self.content))
         self._favicon_pixmap = QPixmap()
         self.setObjectName("chip")
 
@@ -816,14 +824,32 @@ class ChipWidget(QWidget):
         ):
             distance = (event.pos() - self._drag_start_position).manhattanLength()
             if distance >= QApplication.startDragDistance():
+                self._image_click_timer.stop()
                 self._dragging = True
                 self._start_drag()
         super().mouseMoveEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and self.kind == "IMG":
+            self._image_click_timer.stop()
+            self._suppress_next_release = True
+            image_path = Path(self.content)
+            if image_path.is_file():
+                self.image_opening.emit(str(image_path))
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(image_path.resolve())))
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if not self._dragging and not self._is_deleting:
-                self.paste_requested.emit(self.content)
+            if self._suppress_next_release:
+                self._suppress_next_release = False
+            elif not self._dragging and not self._is_deleting:
+                if self.kind == "IMG":
+                    self._image_click_timer.start()
+                else:
+                    self.paste_requested.emit(self.content)
             self._drag_start_position = None
             self._dragging = False
         super().mouseReleaseEvent(event)

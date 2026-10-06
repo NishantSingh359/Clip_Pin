@@ -2,6 +2,7 @@ from hashlib import sha256
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 
 from PySide6.QtCore import QObject, QBuffer, Signal
 from PySide6.QtWidgets import QApplication
@@ -30,6 +31,7 @@ class ClipboardManager(QObject):
         self._last_image_cache_key = None
         self._last_image_hash = None
         self._pending_image_hashes = set()
+        self._ignored_image_hashes = {}
         self._ignore_next_count = 0
         self._pending_restore = False
         self._restore_text = None
@@ -45,6 +47,29 @@ class ClipboardManager(QObject):
     def set_size_limit_enabled(self, enabled):
         self.enforce_size_limit = bool(enabled)
         self.image_store.set_size_limit_enabled(enabled)
+
+    def ignore_image_capture(self, image_path):
+        """Ignore clipboard copies of an image opened by an external viewer.
+
+        Queue registration on the image worker before launching the viewer so
+        any clipboard image it publishes is checked against the registered hash.
+        """
+        self._image_executor.submit(self._register_ignored_image, str(image_path))
+
+    def _register_ignored_image(self, image_path):
+        try:
+            image = QImage(image_path)
+            image_hash = self._hash_image(image) if not image.isNull() else None
+            if image_hash:
+                expires_at = monotonic() + 30
+                self._ignored_image_hashes = {
+                    known_hash: expiry
+                    for known_hash, expiry in self._ignored_image_hashes.items()
+                    if expiry >= monotonic()
+                }
+                self._ignored_image_hashes[image_hash] = expires_at
+        except Exception:
+            log_exception("Failed to register image opened in external viewer")
 
     def set_text_for_paste(self, text, temporary=False):
         self._ignore_next_count += 1
@@ -200,6 +225,12 @@ class ClipboardManager(QObject):
             image_hash = image_hash or self._hash_image(image)
             if not image_hash:
                 return
+
+            ignored_until = self._ignored_image_hashes.get(image_hash)
+            if ignored_until is not None:
+                if monotonic() <= ignored_until:
+                    return
+                self._ignored_image_hashes.pop(image_hash, None)
 
             with self._image_lock:
                 if image_hash == self._last_image_hash:
