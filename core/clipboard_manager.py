@@ -24,6 +24,7 @@ class ClipboardManager(QObject):
         super().__init__()
         self.clipboard = QApplication.clipboard()
         self.image_store = ImageStore(base_dir)
+        self.enforce_size_limit = True
         self.db = ClipboardDatabase(base_dir)
         self._last_text = ""
         self._last_image_cache_key = None
@@ -40,6 +41,10 @@ class ClipboardManager(QObject):
     def get_db(self):
         """Return the database instance for external queries."""
         return self.db
+
+    def set_size_limit_enabled(self, enabled):
+        self.enforce_size_limit = bool(enabled)
+        self.image_store.set_size_limit_enabled(enabled)
 
     def set_text_for_paste(self, text, temporary=False):
         self._ignore_next_count += 1
@@ -111,11 +116,13 @@ class ClipboardManager(QObject):
             # Image size metadata is O(1); avoid reading every encoded clipboard
             # format on the UI thread. Hashing/encoding happens in the worker.
             source_size_bytes = self.image_store.image_payload_size(image)
-            if source_size_bytes is None or source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
+            if source_size_bytes is None or (
+                self.enforce_size_limit and source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES
+            ):
                 # Remember this image so repeated clipboard notifications do not
                 # repeatedly inspect and reject the same oversized content.
                 self._last_image_cache_key = cache_key
-                if source_size_bytes is not None:
+                if self.enforce_size_limit and source_size_bytes is not None:
                     self.oversized_item_rejected.emit()
                 return
 
@@ -139,10 +146,10 @@ class ClipboardManager(QObject):
             if paths:
                 for path in paths:
                     content = str(path)
-                    if is_oversized_text(content):
+                    if self.enforce_size_limit and is_oversized_text(content):
                         rejected_oversized_path = True
                         continue
-                    if is_oversized_file(path):
+                    if self.enforce_size_limit and is_oversized_file(path):
                         rejected_oversized_path = True
                         continue
                     try:
@@ -156,14 +163,14 @@ class ClipboardManager(QObject):
 
 
         if not mime.hasText():
-            if mime.hasHtml() and is_oversized_text(mime.html()):
+            if self.enforce_size_limit and mime.hasHtml() and is_oversized_text(mime.html()):
                 self.oversized_item_rejected.emit()
             return
 
         raw_text = mime.text()
-        if is_oversized_text(raw_text) or (
+        if self.enforce_size_limit and (is_oversized_text(raw_text) or (
             mime.hasHtml() and is_oversized_text(mime.html())
-        ):
+        )):
             if raw_text != self._last_text:
                 self.oversized_item_rejected.emit()
             self._last_text = raw_text
@@ -177,7 +184,7 @@ class ClipboardManager(QObject):
         try:
             path = Path(text)
             if path.exists():
-                if is_oversized_text(text) or is_oversized_file(path):
+                if self.enforce_size_limit and (is_oversized_text(text) or is_oversized_file(path)):
                     self.oversized_item_rejected.emit()
                     return
                 self.db.insert_with_type(text, "path")
@@ -211,7 +218,8 @@ class ClipboardManager(QObject):
                 return
 
             image_file = Path(image_path)
-            if image_file.is_file() and image_file.stat().st_size > MAX_CLIP_ITEM_SIZE_BYTES:
+            if (self.enforce_size_limit and image_file.is_file()
+                    and image_file.stat().st_size > MAX_CLIP_ITEM_SIZE_BYTES):
                 image_file.unlink(missing_ok=True)
                 self.oversized_item_rejected.emit()
                 return

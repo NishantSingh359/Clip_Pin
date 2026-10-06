@@ -14,8 +14,13 @@ class DragDropHandler:
     def __init__(self, base_dir):
         self.base_dir = Path(base_dir)
         self.image_store = ImageStore(self.base_dir)
+        self.enforce_size_limit = True
         self.db = ClipboardDatabase(self.base_dir)
         self.oversized_item_rejected = False
+
+    def set_size_limit_enabled(self, enabled):
+        self.enforce_size_limit = bool(enabled)
+        self.image_store.set_size_limit_enabled(enabled)
 
 
     def can_accept(self, mime_data):
@@ -44,11 +49,11 @@ class DragDropHandler:
                     # keep only filesystem paths
                     p = Path(it)
                     if p.exists() and (p.is_file() or p.is_dir()):
-                        if is_oversized_file(p):
+                        if self.enforce_size_limit and is_oversized_file(p):
                             self.oversized_item_rejected = True
                             continue
                         self.db.insert_with_type(it, "path")
-                    elif is_oversized_text(it):
+                    elif self.enforce_size_limit and is_oversized_text(it):
                         self.oversized_item_rejected = True
                         continue
                     accepted_url_items.append(it)
@@ -57,13 +62,15 @@ class DragDropHandler:
             if mime_data.hasImage():
                 image_data = mime_data.imageData()
                 source_size_bytes = self.image_store.image_payload_size(image_data, mime_data)
-                if source_size_bytes is not None and source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
+                if (self.enforce_size_limit and source_size_bytes is not None
+                        and source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES):
                     self.oversized_item_rejected = True
                     image_path = None
                 else:
                     image_path = self._save_image(image_data, source_size_bytes)
                     image_file = Path(image_path) if image_path else None
-                    if image_file and image_file.is_file() and image_file.stat().st_size > MAX_CLIP_ITEM_SIZE_BYTES:
+                    if (self.enforce_size_limit and image_file and image_file.is_file()
+                            and image_file.stat().st_size > MAX_CLIP_ITEM_SIZE_BYTES):
                         image_file.unlink(missing_ok=True)
                         self.oversized_item_rejected = True
                         image_path = None
@@ -72,7 +79,7 @@ class DragDropHandler:
 
             if not items and not self.oversized_item_rejected and mime_data.hasText():
                 raw_text = mime_data.text()
-                if not is_oversized_text(raw_text):
+                if not self.enforce_size_limit or not is_oversized_text(raw_text):
                     text = raw_text.strip()
                     if text:
                         items.append(text)
@@ -81,7 +88,7 @@ class DragDropHandler:
 
             if not items and not self.oversized_item_rejected and mime_data.hasHtml():
                 raw_html = mime_data.html()
-                if not is_oversized_text(raw_html):
+                if not self.enforce_size_limit or not is_oversized_text(raw_html):
                     html = raw_html.strip()
                     if html:
                         items.append(html)

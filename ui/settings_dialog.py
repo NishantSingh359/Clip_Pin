@@ -30,6 +30,7 @@ class SettingsDialog(QDialog):
         hide_on_paste,
         show_clip_indexes,
         color_preview_enabled,
+        prevent_oversize_items,
         show_oversize_warning,
         close_to_tray,
         start_with_windows,
@@ -44,6 +45,7 @@ class SettingsDialog(QDialog):
         on_hide_on_paste,
         on_show_clip_indexes,
         on_color_preview,
+        on_prevent_oversize_items,
         on_oversize_warning,
         on_close_to_tray,
         on_start_with_windows,
@@ -95,12 +97,18 @@ class SettingsDialog(QDialog):
         self.color_preview = self._add_checkbox(
             layout, "Show Color Preview", color_preview_enabled, on_color_preview
         )
+        self.prevent_oversize_items = self._add_checkbox(
+            layout, "Prevent items over 5 MB from entering history",
+            prevent_oversize_items, on_prevent_oversize_items
+        )
         self.oversize_warning = self._add_checkbox(
             layout,
             "Warn when items exceed 5 MB",
             show_oversize_warning,
             on_oversize_warning,
         )
+        self.oversize_warning.setEnabled(bool(prevent_oversize_items))
+        self.prevent_oversize_items.toggled.connect(self._set_oversize_warning_availability)
         self.close_to_tray = self._add_checkbox(
             layout, "Keep Running When Closed", close_to_tray, on_close_to_tray
         )
@@ -166,6 +174,7 @@ class SettingsDialog(QDialog):
         settings = theme.get("settings", {})
         background = settings.get("background", "#202124")
         text_color = settings.get("text", "#c0c0c0")
+        disabled_text_color = settings.get("disabled_text", "#777b82")
         heading_color = settings.get("heading", "#c0c0c0")
         button_background = settings.get("button_background", "#34373b")
         button_border = settings.get("button_border", "#45494e")
@@ -208,6 +217,7 @@ class SettingsDialog(QDialog):
                 spacing: {settings.get("checkbox_spacing", 10)}px;
                 padding: {settings.get("checkbox_padding", [5, 2])[0]}px {settings.get("checkbox_padding", [5, 2])[1]}px;
             }}
+            QCheckBox:disabled {{ color: {disabled_text_color}; }}
             QCheckBox::indicator {{
                 width: {settings.get("checkbox_indicator_size", 16)}px;
                 height: {settings.get("checkbox_indicator_size", 16)}px;
@@ -218,6 +228,10 @@ class SettingsDialog(QDialog):
             QCheckBox::indicator:checked {{
                 background: {checkbox_checked};
                 border-color: {checkbox_checked};
+            }}
+            QCheckBox::indicator:disabled {{
+                background: {background};
+                border-color: {disabled_text_color};
             }}
             QPushButton {{
                 min-width: {settings.get("button_min_width", 64)}px;
@@ -259,3 +273,8 @@ class SettingsDialog(QDialog):
         checkbox.toggled.connect(callback)
         layout.addWidget(checkbox)
         return checkbox
+
+    def _set_oversize_warning_availability(self, prevention_enabled):
+        self.oversize_warning.setEnabled(prevention_enabled)
+        if not prevention_enabled and self.oversize_warning.isChecked():
+            self.oversize_warning.setChecked(False)

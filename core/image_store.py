@@ -21,6 +21,10 @@ class ImageStore:
     def __init__(self, base_dir):
         self.thumbnail_dir = Path(base_dir) / THUMBNAILS_DIR
         self.thumbnail_dir.mkdir(parents=True, exist_ok=True)
+        self.enforce_size_limit = True
+
+    def set_size_limit_enabled(self, enabled):
+        self.enforce_size_limit = bool(enabled)
 
     def purge_old_thumbnails(self, retention_days: int = THUMBNAIL_RETENTION_DAYS) -> int:
         """Delete thumbnail image files older than retention_days.
@@ -74,7 +78,9 @@ class ImageStore:
 
         if source_size_bytes is None:
             source_size_bytes = self.image_payload_size(image)
-        if source_size_bytes is None or source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
+        if source_size_bytes is None or (
+            self.enforce_size_limit and source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES
+        ):
             return None
 
         image = self._bounded_image(image)

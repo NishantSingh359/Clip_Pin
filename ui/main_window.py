@@ -176,6 +176,7 @@ class MainWindow(QWidget):
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
         self.color_preview_enabled = COLOR_PREVIEW_ENABLED
+        self.prevent_oversize_items_enabled = True
         self.show_oversize_warning_enabled = True
         self.close_to_tray_enabled = True
         self.start_with_windows_enabled = False
@@ -224,6 +225,8 @@ class MainWindow(QWidget):
         self.paste_controller = PasteController()
         self.dragdrop_handler = DragDropHandler(APP_STORAGE_DIR)
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
+        self.dragdrop_handler.set_size_limit_enabled(self.prevent_oversize_items_enabled)
+        self.clipboard_manager.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.text_copied.connect(self.add_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
         self.clipboard_manager.path_copied.connect(self.add_clip)
@@ -737,12 +740,20 @@ class MainWindow(QWidget):
         self._save_context_menu_settings()
 
     def set_oversize_warning_enabled(self, enabled):
-        self.show_oversize_warning_enabled = bool(enabled)
+        self.show_oversize_warning_enabled = bool(enabled) and self.prevent_oversize_items_enabled
+        self._save_context_menu_settings()
+
+    def set_oversize_prevention_enabled(self, enabled):
+        self.prevent_oversize_items_enabled = bool(enabled)
+        self.dragdrop_handler.set_size_limit_enabled(self.prevent_oversize_items_enabled)
+        self.clipboard_manager.set_size_limit_enabled(self.prevent_oversize_items_enabled)
+        if not self.prevent_oversize_items_enabled:
+            self.show_oversize_warning_enabled = False
         self._save_context_menu_settings()
 
     @Slot()
     def _show_oversized_item_popup(self):
-        if not self.show_oversize_warning_enabled:
+        if not self.prevent_oversize_items_enabled or not self.show_oversize_warning_enabled:
             return
         if self._oversized_item_popup is None:
             self._oversized_item_popup = OversizedItemPopup()
@@ -827,7 +838,10 @@ class MainWindow(QWidget):
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
             self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
-            self.show_oversize_warning_enabled = bool(
+            self.prevent_oversize_items_enabled = bool(
+                settings.get("prevent_oversize_items_enabled", self.prevent_oversize_items_enabled)
+            )
+            self.show_oversize_warning_enabled = self.prevent_oversize_items_enabled and bool(
                 settings.get("show_oversize_warning_enabled", self.show_oversize_warning_enabled)
             )
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
@@ -871,6 +885,7 @@ class MainWindow(QWidget):
                         "hide_on_paste_enabled": self.hide_on_paste_enabled,
                         "clip_indexing_enabled": self.clip_indexing_enabled,
                         "color_preview_enabled": self.color_preview_enabled,
+                        "prevent_oversize_items_enabled": self.prevent_oversize_items_enabled,
                         "show_oversize_warning_enabled": self.show_oversize_warning_enabled,
                         "close_to_tray_enabled": self.close_to_tray_enabled,
                         "start_with_windows_enabled": self.start_with_windows_enabled,
@@ -917,6 +932,7 @@ class MainWindow(QWidget):
             hide_on_paste=self.hide_on_paste_enabled,
             show_clip_indexes=self.clip_indexing_enabled,
             color_preview_enabled=self.color_preview_enabled,
+            prevent_oversize_items=self.prevent_oversize_items_enabled,
             show_oversize_warning=self.show_oversize_warning_enabled,
             close_to_tray=self.close_to_tray_enabled,
             start_with_windows=self.start_with_windows_enabled,
@@ -931,6 +947,7 @@ class MainWindow(QWidget):
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
             on_color_preview=self.set_color_preview_enabled,
+            on_prevent_oversize_items=self.set_oversize_prevention_enabled,
             on_oversize_warning=self.set_oversize_warning_enabled,
             on_close_to_tray=self.set_close_to_tray_enabled,
             on_start_with_windows=self.set_start_with_windows_enabled,
