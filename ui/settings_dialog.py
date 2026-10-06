@@ -30,6 +30,7 @@ class SettingsDialog(QDialog):
         hide_on_paste,
         show_clip_indexes,
         color_preview_enabled,
+        show_oversize_warning,
         close_to_tray,
         start_with_windows,
         chip_min_width,
@@ -43,6 +44,7 @@ class SettingsDialog(QDialog):
         on_hide_on_paste,
         on_show_clip_indexes,
         on_color_preview,
+        on_oversize_warning,
         on_close_to_tray,
         on_start_with_windows,
         on_chip_min_width,
@@ -92,6 +94,12 @@ class SettingsDialog(QDialog):
         )
         self.color_preview = self._add_checkbox(
             layout, "Show Color Preview", color_preview_enabled, on_color_preview
+        )
+        self.oversize_warning = self._add_checkbox(
+            layout,
+            "Warn when items exceed 5 MB",
+            show_oversize_warning,
+            on_oversize_warning,
         )
         self.close_to_tray = self._add_checkbox(
             layout, "Keep Running When Closed", close_to_tray, on_close_to_tray

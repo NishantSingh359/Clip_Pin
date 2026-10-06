@@ -127,5 +127,17 @@
 
   "scroll_viewport": {
     "border_radius": 40
+  },
+
+  "notification": {
+    "background": "#292b2f",
+    "text": "#f2f2f2",
+    "muted_text": "#c0c0c0",
+    "border": "rgba(255, 255, 255, 0.14)",
+    "accent": "#b4bf54",
+    "border_radius": 12,
+    "padding": [12, 16],
+    "width": 360,
+    "duration_ms": 4500
   }
 }

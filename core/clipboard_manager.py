@@ -18,6 +18,7 @@ class ClipboardManager(QObject):
     text_copied = Signal(str)
     image_copied = Signal(str)
     path_copied = Signal(str)
+    oversized_item_rejected = Signal()
 
     def __init__(self, base_dir):
         super().__init__()
@@ -107,28 +108,23 @@ class ClipboardManager(QObject):
             if cache_key == self._last_image_cache_key:
                 return
 
-            source_size_bytes = self.image_store.image_payload_size(image, mime)
+            # Image size metadata is O(1); avoid reading every encoded clipboard
+            # format on the UI thread. Hashing/encoding happens in the worker.
+            source_size_bytes = self.image_store.image_payload_size(image)
             if source_size_bytes is None or source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
                 # Remember this image so repeated clipboard notifications do not
-                # repeatedly encode and reject the same oversized content.
+                # repeatedly inspect and reject the same oversized content.
                 self._last_image_cache_key = cache_key
+                if source_size_bytes is not None:
+                    self.oversized_item_rejected.emit()
                 return
-
-            image_hash = self._hash_image(image)
-            if not image_hash:
-                return
-
-            with self._image_lock:
-                if image_hash == self._last_image_hash or image_hash in self._pending_image_hashes:
-                    return
-                self._pending_image_hashes.add(image_hash)
 
             self._last_image_cache_key = cache_key
             self._image_executor.submit(
                 self._process_image,
-                image.copy(),
-                image_hash,
-                True,
+                image,
+                None,
+                False,
                 source_size_bytes,
             )
             return
@@ -139,26 +135,37 @@ class ClipboardManager(QObject):
                 for url in mime.urls()
                 if url.isLocalFile() and Path(url.toLocalFile()).exists()
             ]
+            rejected_oversized_path = False
             if paths:
                 for path in paths:
                     content = str(path)
-                    if is_oversized_text(content) or is_oversized_file(path):
+                    if is_oversized_text(content):
+                        rejected_oversized_path = True
+                        continue
+                    if is_oversized_file(path):
+                        rejected_oversized_path = True
                         continue
                     try:
                         self.db.insert_with_type(content, "path")
                         self.path_copied.emit(content)
                     except Exception:
                         log_exception("Failed to store clipboard path")
+                if rejected_oversized_path:
+                    self.oversized_item_rejected.emit()
                 return
 
 
         if not mime.hasText():
+            if mime.hasHtml() and is_oversized_text(mime.html()):
+                self.oversized_item_rejected.emit()
             return
 
         raw_text = mime.text()
         if is_oversized_text(raw_text) or (
             mime.hasHtml() and is_oversized_text(mime.html())
         ):
+            if raw_text != self._last_text:
+                self.oversized_item_rejected.emit()
             self._last_text = raw_text
             return
 
@@ -171,6 +178,7 @@ class ClipboardManager(QObject):
             path = Path(text)
             if path.exists():
                 if is_oversized_text(text) or is_oversized_file(path):
+                    self.oversized_item_rejected.emit()
                     return
                 self.db.insert_with_type(text, "path")
                 self.path_copied.emit(text)
@@ -200,6 +208,12 @@ class ClipboardManager(QObject):
                 source_size_bytes,
             )
             if not image_path:
+                return
+
+            image_file = Path(image_path)
+            if image_file.is_file() and image_file.stat().st_size > MAX_CLIP_ITEM_SIZE_BYTES:
+                image_file.unlink(missing_ok=True)
+                self.oversized_item_rejected.emit()
                 return
 
             self.db.insert_with_type(image_path, "img")

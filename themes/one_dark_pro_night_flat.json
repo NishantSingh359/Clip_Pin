@@ -159,5 +159,16 @@
   },
   "scroll_viewport": {
     "border_radius": 40
+  },
+  "notification": {
+    "background": "#1e2227",
+    "text": "#d7dae0",
+    "muted_text": "#abb2bf",
+    "border": "#3e4452",
+    "accent": "#4d78cc",
+    "border_radius": 12,
+    "padding": [12, 16],
+    "width": 360,
+    "duration_ms": 4500
   }
 }

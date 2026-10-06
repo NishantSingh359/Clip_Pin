@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QParallelAnimationGroup,
     QEasingCurve,
     QSize,
+    Slot,
 )
 from PySide6.QtGui import (
     QAction,
@@ -47,6 +48,7 @@ from core.paste_controller import PasteController
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
+from ui.notification_popup import OversizedItemPopup
 from ui.animations import fade, parse_color
 from ui.theme_manager import ThemeManager, get_theme_value, set_active_theme
 from animation_config import (
@@ -174,6 +176,7 @@ class MainWindow(QWidget):
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
         self.color_preview_enabled = COLOR_PREVIEW_ENABLED
+        self.show_oversize_warning_enabled = True
         self.close_to_tray_enabled = True
         self.start_with_windows_enabled = False
         self.chip_min_width = CHIP_MIN_WIDTH
@@ -183,6 +186,7 @@ class MainWindow(QWidget):
         self.shelf_width_ratio = float(shelf_theme.get("width_ratio", SHELF_WIDTH_RATIO))
         self._next_chip_number = 1
         self._settings_dialog = None
+        self._oversized_item_popup = None
         self._shadow_margin = max(
             0,
             int(
@@ -223,6 +227,7 @@ class MainWindow(QWidget):
         self.clipboard_manager.text_copied.connect(self.add_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
         self.clipboard_manager.path_copied.connect(self.add_clip)
+        self.clipboard_manager.oversized_item_rejected.connect(self._show_oversized_item_popup)
 
         self.animation = QPropertyAnimation(self, b"pos")
         self.animation.setDuration(MOTION_SHELF_MS)
@@ -687,6 +692,8 @@ class MainWindow(QWidget):
             event.ignore()
             return
         items = self.dragdrop_handler.extract_items(event.mimeData())
+        if getattr(self.dragdrop_handler, "oversized_item_rejected", False) is True:
+            self._show_oversized_item_popup()
         if not items:
             event.ignore()
             return
@@ -728,6 +735,18 @@ class MainWindow(QWidget):
         for chip in self.chips_by_content.values():
             chip.set_color_preview_enabled(self.color_preview_enabled)
         self._save_context_menu_settings()
+
+    def set_oversize_warning_enabled(self, enabled):
+        self.show_oversize_warning_enabled = bool(enabled)
+        self._save_context_menu_settings()
+
+    @Slot()
+    def _show_oversized_item_popup(self):
+        if not self.show_oversize_warning_enabled:
+            return
+        if self._oversized_item_popup is None:
+            self._oversized_item_popup = OversizedItemPopup()
+        self._oversized_item_popup.show_notice(self.theme)
 
     def _context_menu_settings_path(self):
         settings_path = APP_STORAGE_DIR / "settings.json"
@@ -808,6 +827,9 @@ class MainWindow(QWidget):
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
             self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
+            self.show_oversize_warning_enabled = bool(
+                settings.get("show_oversize_warning_enabled", self.show_oversize_warning_enabled)
+            )
             self.close_to_tray_enabled = bool(settings.get("close_to_tray_enabled", self.close_to_tray_enabled))
             self.start_with_windows_enabled = bool(settings.get("start_with_windows_enabled", self.start_with_windows_enabled))
             self.theme_name = self.theme_manager.get_theme(settings.get("theme", self.theme_name))["name"]
@@ -849,6 +871,7 @@ class MainWindow(QWidget):
                         "hide_on_paste_enabled": self.hide_on_paste_enabled,
                         "clip_indexing_enabled": self.clip_indexing_enabled,
                         "color_preview_enabled": self.color_preview_enabled,
+                        "show_oversize_warning_enabled": self.show_oversize_warning_enabled,
                         "close_to_tray_enabled": self.close_to_tray_enabled,
                         "start_with_windows_enabled": self.start_with_windows_enabled,
                         "chip_min_width": self.chip_min_width,
@@ -894,6 +917,7 @@ class MainWindow(QWidget):
             hide_on_paste=self.hide_on_paste_enabled,
             show_clip_indexes=self.clip_indexing_enabled,
             color_preview_enabled=self.color_preview_enabled,
+            show_oversize_warning=self.show_oversize_warning_enabled,
             close_to_tray=self.close_to_tray_enabled,
             start_with_windows=self.start_with_windows_enabled,
             chip_min_width=self.chip_min_width,
@@ -907,6 +931,7 @@ class MainWindow(QWidget):
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
             on_color_preview=self.set_color_preview_enabled,
+            on_oversize_warning=self.set_oversize_warning_enabled,
             on_close_to_tray=self.set_close_to_tray_enabled,
             on_start_with_windows=self.set_start_with_windows_enabled,
             on_chip_min_width=self.set_chip_min_width,
