@@ -1,5 +1,6 @@
-from hashlib import sha256
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from time import monotonic
@@ -13,6 +14,8 @@ from core.database import ClipboardDatabase
 from config import MAX_CLIP_ITEM_SIZE_BYTES
 from utils.app_logging import log_exception, safe_slot
 from utils.item_limits import is_oversized_file, is_oversized_text
+
+PASTE_IMAGE_CACHE_MAX_BYTES = 48 * 1024 * 1024
 
 
 class ClipboardManager(QObject):
@@ -32,10 +35,15 @@ class ClipboardManager(QObject):
         self._last_image_hash = None
         self._pending_image_hashes = set()
         self._ignored_image_hashes = {}
+        self._paste_image_cache = OrderedDict()
+        self._paste_image_cache_bytes = 0
         self._ignore_next_count = 0
         self._pending_restore = False
         self._restore_text = None
         self._restore_image = None
+        self._restore_image_hash = None
+        self._clipboard_image_snapshot = None
+        self._clipboard_image_snapshot_hash = None
         self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
         self._image_lock = Lock()
         self.clipboard.dataChanged.connect(self.on_data_changed)
@@ -75,23 +83,33 @@ class ClipboardManager(QObject):
         self._ignore_next_count += 1
         self._last_text = text
         self._restore_text = self._get_current_clipboard_text()
-        self._restore_image = self._get_current_clipboard_image()
+        self._restore_image = self._clipboard_image_snapshot
+        if self._restore_image is None:
+            self._restore_image = self._get_current_clipboard_image()
+        self._restore_image_hash = self._clipboard_image_snapshot_hash
         self.clipboard.setText(text, QClipboard.Clipboard)
+        self._clipboard_image_snapshot = None
+        self._clipboard_image_snapshot_hash = None
         if temporary:
             self._pending_restore = True
 
     def set_image_for_paste(self, image_path, temporary=False):
         try:
-            image = QImage(image_path)
+            image, image_hash = self._load_paste_image(image_path)
             if image.isNull():
                 return False
 
             self._ignore_next_count += 1
             self._last_image_cache_key = image.cacheKey()
-            self._last_image_hash = self._hash_image(image)
+            self._last_image_hash = image_hash
             self._restore_text = self._get_current_clipboard_text()
-            self._restore_image = self._get_current_clipboard_image()
+            self._restore_image = self._clipboard_image_snapshot
+            if self._restore_image is None:
+                self._restore_image = self._get_current_clipboard_image()
+            self._restore_image_hash = self._clipboard_image_snapshot_hash
             self.clipboard.setImage(image, QClipboard.Clipboard)
+            self._clipboard_image_snapshot = image
+            self._clipboard_image_snapshot_hash = image_hash
             if temporary:
                 self._pending_restore = True
             return True
@@ -109,17 +127,25 @@ class ClipboardManager(QObject):
         previous_image = getattr(self, "_restore_image", None)
         if previous_image is not None:
             self._last_image_cache_key = previous_image.cacheKey()
-            self._last_image_hash = self._hash_image(previous_image)
+            self._last_image_hash = (
+                self._restore_image_hash or self._hash_image(previous_image)
+            )
             self.clipboard.setImage(previous_image, QClipboard.Clipboard)
+            self._clipboard_image_snapshot = previous_image
+            self._clipboard_image_snapshot_hash = self._last_image_hash
             return
         if previous_text is not None:
             self._last_text = previous_text
             self.clipboard.setText(previous_text, QClipboard.Clipboard)
+            self._clipboard_image_snapshot = None
+            self._clipboard_image_snapshot_hash = None
             return
 
         self._last_text = ""
         self._last_image_cache_key = None
         self._last_image_hash = None
+        self._clipboard_image_snapshot = None
+        self._clipboard_image_snapshot_hash = None
         self.clipboard.clear(QClipboard.Clipboard)
 
     @safe_slot("Failed to process clipboard change")
@@ -132,7 +158,11 @@ class ClipboardManager(QObject):
         if mime.hasImage():
             image = self.clipboard.image()
             if image.isNull():
+                self._clipboard_image_snapshot = None
+                self._clipboard_image_snapshot_hash = None
                 return
+            self._clipboard_image_snapshot = image
+            self._clipboard_image_snapshot_hash = None
 
             cache_key = image.cacheKey()
             if cache_key == self._last_image_cache_key:
@@ -162,6 +192,8 @@ class ClipboardManager(QObject):
             return
 
         if mime.hasUrls():
+            self._clipboard_image_snapshot = None
+            self._clipboard_image_snapshot_hash = None
             paths = [
                 Path(url.toLocalFile())
                 for url in mime.urls()
@@ -188,11 +220,15 @@ class ClipboardManager(QObject):
 
 
         if not mime.hasText():
+            self._clipboard_image_snapshot = None
+            self._clipboard_image_snapshot_hash = None
             if self.enforce_size_limit and mime.hasHtml() and is_oversized_text(mime.html()):
                 self.oversized_item_rejected.emit()
             return
 
         raw_text = mime.text()
+        self._clipboard_image_snapshot = None
+        self._clipboard_image_snapshot_hash = None
         if self.enforce_size_limit and (is_oversized_text(raw_text) or (
             mime.hasHtml() and is_oversized_text(mime.html())
         )):
@@ -222,6 +258,7 @@ class ClipboardManager(QObject):
 
     def _process_image(self, image, image_hash=None, reserved=False, source_size_bytes=None):
         try:
+            image_cache_key = image.cacheKey()
             image_hash = image_hash or self._hash_image(image)
             if not image_hash:
                 return
@@ -256,8 +293,12 @@ class ClipboardManager(QObject):
                 return
 
             self.db.insert_with_type(image_path, "img")
-            with self._image_lock:
-                self._last_image_hash = image_hash
+            if image_cache_key == self._last_image_cache_key:
+                with self._image_lock:
+                    self._last_image_hash = image_hash
+            snapshot = self._clipboard_image_snapshot
+            if snapshot is not None and image_cache_key == snapshot.cacheKey():
+                self._clipboard_image_snapshot_hash = image_hash
             self.image_copied.emit(image_path)
         except Exception:
             log_exception("Failed to process clipboard image")
@@ -273,6 +314,40 @@ class ClipboardManager(QObject):
             return None
         data = bytes(buffer.data())
         return sha256(data).hexdigest()
+
+    def _load_paste_image(self, image_path):
+        """Load and hash a saved image once, reusing recent decoded images."""
+        path = Path(image_path)
+        try:
+            stat = path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            signature = None
+
+        key = str(path.resolve())
+        cached = self._paste_image_cache.get(key)
+        if cached is not None and cached[0] == signature:
+            self._paste_image_cache.move_to_end(key)
+            return cached[1], cached[2]
+        if cached is not None:
+            self._paste_image_cache_bytes -= cached[3]
+            del self._paste_image_cache[key]
+
+        image = QImage(str(path))
+        if image.isNull():
+            return image, None
+        image_hash = self._hash_image(image)
+        image_bytes = max(0, int(image.sizeInBytes()))
+        if signature is not None and image_hash and image_bytes <= PASTE_IMAGE_CACHE_MAX_BYTES:
+            self._paste_image_cache[key] = (signature, image, image_hash, image_bytes)
+            self._paste_image_cache_bytes += image_bytes
+            while (
+                self._paste_image_cache_bytes > PASTE_IMAGE_CACHE_MAX_BYTES
+                and len(self._paste_image_cache) > 1
+            ):
+                _, evicted = self._paste_image_cache.popitem(last=False)
+                self._paste_image_cache_bytes -= evicted[3]
+        return image, image_hash
 
     def _get_current_clipboard_text(self):
         mime = self.clipboard.mimeData()
