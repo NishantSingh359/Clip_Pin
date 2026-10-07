@@ -49,6 +49,7 @@ class ImageStore:
             if mtime < cutoff_ts:
                 try:
                     p.unlink(missing_ok=True)  # type: ignore[arg-type]
+                    Path(f"{p}.mime.json").unlink(missing_ok=True)
                     deleted += 1
                 except OSError:
                     pass

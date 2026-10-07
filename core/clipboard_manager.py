@@ -1,3 +1,5 @@
+import base64
+import json
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
@@ -5,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from time import monotonic
 
-from PySide6.QtCore import QObject, QBuffer, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, QByteArray, QBuffer, QMimeData, Signal, Slot, QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QClipboard
 
@@ -16,6 +18,7 @@ from utils.app_logging import log_exception, safe_slot
 from utils.item_limits import is_oversized_file, is_oversized_text
 
 PASTE_IMAGE_CACHE_MAX_BYTES = 48 * 1024 * 1024
+MAX_PERSISTED_RICH_FORMAT_BYTES = 16 * 1024 * 1024
 
 
 class ClipboardManager(QObject):
@@ -44,6 +47,9 @@ class ClipboardManager(QObject):
         self._restore_image_hash = None
         self._clipboard_image_snapshot = None
         self._clipboard_image_snapshot_hash = None
+        self._clipboard_rich_formats_snapshot = {}
+        self._restore_rich_formats = {}
+        self._rich_formats_by_image_path = {}
         self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
         self._image_lock = Lock()
         self._clipboard_change_timer = QTimer(self)
@@ -91,9 +97,11 @@ class ClipboardManager(QObject):
         if self._restore_image is None:
             self._restore_image = self._get_current_clipboard_image()
         self._restore_image_hash = self._clipboard_image_snapshot_hash
+        self._restore_rich_formats = self._clipboard_rich_formats_snapshot
         self.clipboard.setText(text, QClipboard.Clipboard)
         self._clipboard_image_snapshot = None
         self._clipboard_image_snapshot_hash = None
+        self._clipboard_rich_formats_snapshot = {}
         if temporary:
             self._pending_restore = True
 
@@ -111,9 +119,15 @@ class ClipboardManager(QObject):
             if self._restore_image is None:
                 self._restore_image = self._get_current_clipboard_image()
             self._restore_image_hash = self._clipboard_image_snapshot_hash
-            self.clipboard.setImage(image, QClipboard.Clipboard)
+            self._restore_rich_formats = self._clipboard_rich_formats_snapshot
+            rich_formats = self._load_rich_formats(image_path)
+            if rich_formats:
+                self.clipboard.setMimeData(self._mime_data_with_image(rich_formats, image))
+            else:
+                self.clipboard.setImage(image, QClipboard.Clipboard)
             self._clipboard_image_snapshot = image
             self._clipboard_image_snapshot_hash = image_hash
+            self._clipboard_rich_formats_snapshot = rich_formats or {}
             if temporary:
                 self._pending_restore = True
             return True
@@ -134,15 +148,22 @@ class ClipboardManager(QObject):
             self._last_image_hash = (
                 self._restore_image_hash or self._hash_image(previous_image)
             )
-            self.clipboard.setImage(previous_image, QClipboard.Clipboard)
+            if self._restore_rich_formats:
+                self.clipboard.setMimeData(
+                    self._mime_data_with_image(self._restore_rich_formats, previous_image)
+                )
+            else:
+                self.clipboard.setImage(previous_image, QClipboard.Clipboard)
             self._clipboard_image_snapshot = previous_image
             self._clipboard_image_snapshot_hash = self._last_image_hash
+            self._clipboard_rich_formats_snapshot = self._restore_rich_formats or {}
             return
         if previous_text is not None:
             self._last_text = previous_text
             self.clipboard.setText(previous_text, QClipboard.Clipboard)
             self._clipboard_image_snapshot = None
             self._clipboard_image_snapshot_hash = None
+            self._clipboard_rich_formats_snapshot = {}
             return
 
         self._last_text = ""
@@ -150,6 +171,7 @@ class ClipboardManager(QObject):
         self._last_image_hash = None
         self._clipboard_image_snapshot = None
         self._clipboard_image_snapshot_hash = None
+        self._clipboard_rich_formats_snapshot = {}
         self.clipboard.clear(QClipboard.Clipboard)
 
     @Slot()
@@ -177,6 +199,7 @@ class ClipboardManager(QObject):
             if image.isNull():
                 self._clipboard_image_snapshot = None
                 self._clipboard_image_snapshot_hash = None
+                self._clipboard_rich_formats_snapshot = {}
                 return
             self._clipboard_image_snapshot = image
             self._clipboard_image_snapshot_hash = None
@@ -198,6 +221,12 @@ class ClipboardManager(QObject):
                     self.oversized_item_rejected.emit()
                 return
 
+            # Only copy rich format payloads after deduplication and size checks.
+            # Some applications publish large native clipboard formats, and
+            # reading them eagerly would add work to every clipboard update.
+            rich_formats = self._capture_rich_formats(mime)
+            self._clipboard_rich_formats_snapshot = rich_formats
+
             self._last_image_cache_key = cache_key
             self._image_executor.submit(
                 self._process_image,
@@ -205,12 +234,14 @@ class ClipboardManager(QObject):
                 None,
                 False,
                 source_size_bytes,
+                rich_formats,
             )
             return
 
         if mime.hasUrls():
             self._clipboard_image_snapshot = None
             self._clipboard_image_snapshot_hash = None
+            self._clipboard_rich_formats_snapshot = {}
             paths = [
                 Path(url.toLocalFile())
                 for url in mime.urls()
@@ -239,6 +270,7 @@ class ClipboardManager(QObject):
         if not mime.hasText():
             self._clipboard_image_snapshot = None
             self._clipboard_image_snapshot_hash = None
+            self._clipboard_rich_formats_snapshot = {}
             if self.enforce_size_limit and mime.hasHtml() and is_oversized_text(mime.html()):
                 self.oversized_item_rejected.emit()
             return
@@ -246,6 +278,7 @@ class ClipboardManager(QObject):
         raw_text = mime.text()
         self._clipboard_image_snapshot = None
         self._clipboard_image_snapshot_hash = None
+        self._clipboard_rich_formats_snapshot = {}
         if self._is_vector_markup(raw_text, mime):
             self._last_text = raw_text
             return
@@ -286,7 +319,91 @@ class ClipboardManager(QObject):
             or ("svg" in formats and ("<?xml" in sample or "<svg" in sample))
         )
 
-    def _process_image(self, image, image_hash=None, reserved=False, source_size_bytes=None):
+    @staticmethod
+    def _capture_rich_formats(mime):
+        """Capture non-raster formats needed to round-trip editable objects."""
+        formats = {}
+        total_bytes = 0
+        try:
+            for raw_format in mime.formats():
+                format_name = str(raw_format)
+                normalized = format_name.lower()
+                if normalized == "application/x-qt-image" or any(
+                    marker in normalized
+                    for marker in (
+                        'value="cf_dib"',
+                        'value="cf_dibv5"',
+                        'value="cf_bitmap"',
+                    )
+                ):
+                    continue
+                if normalized.startswith("image/") and not any(
+                    marker in normalized for marker in ("svg", "emf", "wmf", "metafile")
+                ):
+                    continue
+                payload = bytes(mime.data(raw_format))
+                if not payload:
+                    continue
+                total_bytes += len(payload)
+                if total_bytes > MAX_PERSISTED_RICH_FORMAT_BYTES:
+                    return {}
+                formats[format_name] = payload
+        except Exception:
+            log_exception("Failed to capture rich clipboard formats")
+            return {}
+        return formats
+
+    @staticmethod
+    def _mime_data_with_image(formats, image):
+        mime_data = QMimeData()
+        for format_name, payload in formats.items():
+            mime_data.setData(format_name, QByteArray(payload))
+        mime_data.setImageData(image)
+        return mime_data
+
+    @staticmethod
+    def _rich_formats_sidecar_path(image_path):
+        return Path(f"{image_path}.mime.json")
+
+    def _save_rich_formats(self, image_path, formats):
+        if not formats:
+            return
+        sidecar_path = self._rich_formats_sidecar_path(image_path)
+        try:
+            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+            encoded = {
+                name: base64.b64encode(payload).decode("ascii")
+                for name, payload in formats.items()
+            }
+            with sidecar_path.open("w", encoding="utf-8") as sidecar:
+                json.dump({"version": 1, "formats": encoded}, sidecar)
+            self._rich_formats_by_image_path[str(Path(image_path).resolve())] = formats
+        except Exception:
+            log_exception("Failed to persist rich clipboard formats")
+
+    def _load_rich_formats(self, image_path):
+        key = str(Path(image_path).resolve())
+        cached = self._rich_formats_by_image_path.get(key)
+        if cached is not None:
+            return cached
+        sidecar_path = self._rich_formats_sidecar_path(image_path)
+        try:
+            with sidecar_path.open("r", encoding="utf-8") as sidecar:
+                stored = json.load(sidecar)
+            if stored.get("version") != 1 or not isinstance(stored.get("formats"), dict):
+                return {}
+            decoded = {
+                name: base64.b64decode(payload, validate=True)
+                for name, payload in stored["formats"].items()
+            }
+            self._rich_formats_by_image_path[key] = decoded
+            return decoded
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+
+    def _process_image(
+        self, image, image_hash=None, reserved=False, source_size_bytes=None, rich_formats=None
+    ):
         try:
             image_cache_key = image.cacheKey()
             image_hash = image_hash or self._hash_image(image)
@@ -323,6 +440,8 @@ class ClipboardManager(QObject):
                 return
 
             self.db.insert_with_type(image_path, "img")
+            if rich_formats:
+                self._save_rich_formats(image_path, rich_formats)
             if image_cache_key == self._last_image_cache_key:
                 with self._image_lock:
                     self._last_image_hash = image_hash
