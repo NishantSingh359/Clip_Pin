@@ -19,7 +19,6 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygon,
-    QRegion,
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -63,20 +62,15 @@ class ChipContextMenu(QMenu):
     def _apply_menu_shape(self):
         if self.width() <= 0 or self.height() <= 0:
             return
-        radius = self._effective_corner_radius()
         menu_theme = self.theme.get("context_menu", {})
         self.setStyleSheet(f'''
             QMenu {{
-                background: {menu_theme.get('background', 'rgba(20, 20, 20, 1)')};
+                background: transparent;
                 color: {menu_theme.get('text', 'rgba(200, 200, 200, 1)')};
                 border: none;
                 padding: {menu_theme.get('padding', 6)}px;
             }}
         ''')
-
-        path = QPainterPath()
-        path.addRoundedRect(self.rect(), radius, radius)
-        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     def paintEvent(self, event):
         if self.width() <= 0 or self.height() <= 0:
