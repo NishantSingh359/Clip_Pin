@@ -1,8 +1,67 @@
-from PySide6.QtCore import QPoint, QParallelAnimationGroup, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QParallelAnimationGroup, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtGui import QBrush, QColor, QLinearGradient
 from PySide6.QtWidgets import QGraphicsOpacityEffect
 
 from animation_config import MOTION_ENABLED
+
+
+class EdgeFadeOpacityEffect(QGraphicsOpacityEffect):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._base_opacity = 1.0
+        self._fade_geometry = None
+        super().setOpacity(1.0)
+
+    @Property(float)
+    def base_opacity(self):
+        return self._base_opacity
+
+    @base_opacity.setter
+    def base_opacity(self, opacity):
+        self._base_opacity = max(0.0, min(1.0, float(opacity)))
+        super().setOpacity(self._base_opacity)
+
+    def set_edge_fade(
+        self,
+        chip_left,
+        viewport_width,
+        fade_width,
+        fade_left,
+        fade_right,
+        alpha_stops,
+    ):
+        geometry = (
+            int(chip_left),
+            int(viewport_width),
+            int(fade_width),
+            bool(fade_left),
+            bool(fade_right),
+            tuple((float(position), float(alpha)) for position, alpha in alpha_stops),
+        )
+        if geometry == self._fade_geometry:
+            return
+        self._fade_geometry = geometry
+
+        _, viewport_width, fade_width, fade_left, fade_right, alpha_stops = geometry
+        if viewport_width <= 0 or fade_width <= 0:
+            self.setOpacityMask(QBrush(QColor(0, 0, 0, 255)))
+            return
+
+        gradient = QLinearGradient(-geometry[0], 0, viewport_width - geometry[0], 0)
+        stops = {
+            0.0: alpha_stops[0][1] if fade_left else 1.0,
+            1.0: alpha_stops[0][1] if fade_right else 1.0,
+        }
+        if fade_left:
+            for position, alpha in alpha_stops:
+                stops[position * fade_width / viewport_width] = alpha
+        if fade_right:
+            for position, alpha in alpha_stops:
+                stops[1.0 - position * fade_width / viewport_width] = alpha
+
+        for position, alpha in sorted(stops.items()):
+            gradient.setColorAt(position, QColor(0, 0, 0, round(alpha * 255)))
+        self.setOpacityMask(QBrush(gradient))
 
 
 def remember_animation(widget, animation):
@@ -75,8 +134,13 @@ def fade(widget, start, end, duration, easing=QEasingCurve.OutQuad, finished=Non
         effect = QGraphicsOpacityEffect(widget)
         widget.setGraphicsEffect(effect)
 
-    effect.setOpacity(start)
-    return animate_property(widget, effect, b"opacity", start, end, duration, easing, finished)
+    opacity_property = b"opacity"
+    if isinstance(effect, EdgeFadeOpacityEffect):
+        effect.base_opacity = start
+        opacity_property = b"base_opacity"
+    else:
+        effect.setOpacity(start)
+    return animate_property(widget, effect, opacity_property, start, end, duration, easing, finished)
 
 
 def expand_and_fade_in(widget, target_width, duration=140):

@@ -54,6 +54,17 @@ class TestThemeManager(unittest.TestCase):
         self.assertNotIn("chip_width_min_limit", settings_theme)
         self.assertNotIn("chip_width_max_limit", settings_theme)
 
+    def test_each_builtin_theme_defines_edge_fade_customization(self):
+        themes = ThemeManager()
+
+        for name, _ in themes.available_themes():
+            with self.subTest(theme=name):
+                edge_fade = themes.get_theme(name)["scroll_viewport"]["edge_fade"]
+                self.assertTrue(edge_fade["enabled"])
+                self.assertEqual(edge_fade["width"], 40)
+                self.assertEqual(edge_fade["alpha_stops"][0], [0.0, 0.0])
+                self.assertEqual(edge_fade["alpha_stops"][-1], [1.0, 1.0])
+
     def test_behavioral_defaults_are_configured(self):
         self.assertEqual(CHIP_MIN_WIDTH, 120)
         self.assertEqual(CHIP_MAX_WIDTH, 350)

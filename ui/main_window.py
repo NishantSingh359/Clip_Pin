@@ -50,7 +50,7 @@ from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
 from ui.notification_popup import OversizedItemPopup
 from ui.text_preview_dialog import TextPreviewDialog
-from ui.animations import fade, parse_color
+from ui.animations import EdgeFadeOpacityEffect, fade, parse_color
 from ui.theme_manager import ThemeManager, get_theme_value, set_active_theme
 from animation_config import (
     CHIP_CONTEXT_MENU_FADE_OUT_MS,
@@ -397,6 +397,7 @@ class MainWindow(QWidget):
         self.insert_chip(chip)
         self.refresh_chip_indexes()
         chip.show()
+        self.scroll.refresh_edge_fades()
         chip._entry_fade_animation = fade(
             chip,
             0.0,
@@ -454,7 +455,11 @@ class MainWindow(QWidget):
     def _finish_chip_fade_in(chip):
         chip._entry_fade_animation = None
         if not chip._is_deleting:
-            chip.setGraphicsEffect(None)
+            effect = chip.graphicsEffect()
+            if isinstance(effect, EdgeFadeOpacityEffect):
+                effect.base_opacity = 1.0
+            else:
+                chip.setGraphicsEffect(None)
 
     def update_empty_state(self):
         if hasattr(self, "empty_label"):
@@ -820,6 +825,8 @@ class MainWindow(QWidget):
         self.theme_name = self.theme_manager.get_theme(theme_name)["name"]
         self.theme = self.theme_manager.get_theme(self.theme_name)
         set_active_theme(self.theme_name)
+        if hasattr(self, "scroll"):
+            self.scroll.set_theme(self.theme)
         if hasattr(self, "container"):
             self.container.set_theme(self.theme)
         for chip in self.chips_by_content.values():

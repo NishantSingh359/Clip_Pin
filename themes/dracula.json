@@ -114,7 +114,7 @@
     "checkbox_border": "#6272a4",
     "checkbox_border_radius": 4,
     "checkbox_background": "#343746",
-    "checkbox_checked": "#8F993E",
+    "checkbox_checked": "#FF79C6",
     "button_min_width": 64,
     "button_padding": [
       6,
@@ -161,7 +161,17 @@
     "padding": [12, 12, 12, 12]
   },
   "scroll_viewport": {
-    "border_radius": 40
+    "border_radius": 40,
+    "edge_fade": {
+      "enabled": true,
+      "width": 40,
+      "alpha_stops": [
+        [0.0, 0.0],
+        [0.35, 0.2],
+        [0.7, 0.7],
+        [1.0, 1.0]
+      ]
+    }
   },
   "notification": {
     "background": "#282a36",

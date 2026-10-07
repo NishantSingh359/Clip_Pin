@@ -5,11 +5,12 @@ from unittest.mock import patch
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QSize
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QWidget
 from PySide6.QtTest import QTest
 
 from core.dragdrop_handler import DragDropHandler
 from core.paste_controller import PasteController
+from ui.animations import EdgeFadeOpacityEffect
 from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.main_window import MainWindow
@@ -680,6 +681,157 @@ class TestRuntimeSmoke(unittest.TestCase):
 
         self.assertFalse(first._is_hovered)
         self.assertTrue(second._is_hovered)
+
+    def test_chip_edge_fades_track_overflow_on_both_sides(self):
+        chip_bar = ChipBar()
+        chip_bar.resize(100, 40)
+        content = QWidget()
+        chip = ChipWidget("edge fade")
+        content.resize(300, 40)
+        chip.setParent(content)
+        chip.setGeometry(0, 0, 100, 32)
+        chip_bar.setWidget(content)
+        chip_bar.show()
+        app.processEvents()
+
+        scrollbar = chip_bar.horizontalScrollBar()
+        scrollbar.setRange(0, 100)
+        scrollbar.setValue(50)
+        chip_bar.refresh_edge_fades()
+        effect = chip.graphicsEffect()
+        self.assertIsInstance(effect, EdgeFadeOpacityEffect)
+        self.assertEqual(
+            effect._fade_geometry,
+            (
+                chip.mapTo(chip_bar.viewport(), QPoint(0, 0)).x(),
+                chip_bar.viewport().width(),
+                min(40, chip_bar.viewport().width() // 2),
+                True,
+                True,
+                ((0.0, 0.0), (0.35, 0.2), (0.7, 0.7), (1.0, 1.0)),
+            ),
+        )
+
+        scrollbar.setValue(scrollbar.minimum())
+        chip_bar.refresh_edge_fades()
+        self.assertFalse(effect._fade_geometry[3])
+        self.assertTrue(effect._fade_geometry[4])
+
+        scrollbar.setValue(scrollbar.maximum())
+        chip_bar.refresh_edge_fades()
+        self.assertTrue(effect._fade_geometry[3])
+        self.assertFalse(effect._fade_geometry[4])
+
+        chip_bar.deleteLater()
+
+    def test_chip_edge_fade_settings_apply_from_theme(self):
+        theme = {
+            "scroll_viewport": {
+                "border_radius": 20,
+                "edge_fade": {
+                    "enabled": True,
+                    "width": 24,
+                    "alpha_stops": [[0.0, 0.0], [0.5, 0.25], [1.0, 1.0]],
+                },
+            }
+        }
+        chip_bar = ChipBar(theme)
+        chip_bar.resize(100, 40)
+        content = QWidget()
+        chip = ChipWidget("custom edge fade")
+        content.resize(300, 40)
+        chip.setParent(content)
+        chip.setGeometry(0, 0, 100, 32)
+        chip_bar.setWidget(content)
+        chip_bar.show()
+        app.processEvents()
+        chip_bar.horizontalScrollBar().setValue(50)
+        chip_bar.refresh_edge_fades()
+
+        effect = chip.graphicsEffect()
+        self.assertEqual(chip_bar._edge_fade_width, 24)
+        self.assertEqual(
+            chip_bar._edge_fade_alpha_stops,
+            ((0.0, 0.0), (0.5, 0.25), (1.0, 1.0)),
+        )
+        self.assertEqual(effect._fade_geometry[2], 24)
+        self.assertEqual(effect._fade_geometry[5], chip_bar._edge_fade_alpha_stops)
+
+        updated_theme = {
+            "scroll_viewport": {
+                "edge_fade": {
+                    "enabled": True,
+                    "width": 12,
+                    "alpha_stops": [[0.0, 0.1], [1.0, 0.9]],
+                },
+            }
+        }
+        chip_bar.set_theme(updated_theme)
+        self.assertEqual(chip_bar._edge_fade_width, 12)
+        self.assertEqual(
+            chip_bar._edge_fade_alpha_stops,
+            ((0.0, 0.1), (1.0, 0.9)),
+        )
+        chip_bar.deleteLater()
+
+    def test_chip_entry_fade_keeps_edge_opacity_effect(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        window.add_chip("edge fade entry")
+        chip = window.chips_by_content["edge fade entry"]
+        self.assertIsInstance(chip.graphicsEffect(), EdgeFadeOpacityEffect)
+        window._finish_chip_fade_in(chip)
+        self.assertIsInstance(chip.graphicsEffect(), EdgeFadeOpacityEffect)
+        window.deleteLater()
+
+    def test_edge_opacity_effect_keeps_entry_fade_independent_of_edge_mask(self):
+        effect = EdgeFadeOpacityEffect()
+        effect.set_edge_fade(0, 100, 20, True, True, ((0.0, 0.0), (1.0, 1.0)))
+        self.assertAlmostEqual(effect.opacity(), 1.0)
+        effect.base_opacity = 0.5
+        self.assertAlmostEqual(effect.opacity(), 0.5)
+        effect.base_opacity = 1.0
+        self.assertAlmostEqual(effect.opacity(), 1.0)
+
+    def test_edge_opacity_effect_renders_a_fade_at_both_edges(self):
+        chip = ChipWidget("rendered edge fade")
+        chip.resize(100, 32)
+        effect = EdgeFadeOpacityEffect(chip)
+        effect.set_edge_fade(0, 100, 20, True, True, ((0.0, 0.0), (1.0, 1.0)))
+        chip.setGraphicsEffect(effect)
+        chip.show()
+        app.processEvents()
+
+        image = chip.grab().toImage()
+        left_edge = image.pixelColor(2, image.height() // 2).alpha()
+        left_inner = image.pixelColor(15, image.height() // 2).alpha()
+        center = image.pixelColor(50, image.height() // 2).alpha()
+        right_inner = image.pixelColor(85, image.height() // 2).alpha()
+        right_edge = image.pixelColor(98, image.height() // 2).alpha()
+        self.assertLess(left_edge, left_inner)
+        self.assertLess(left_inner, center)
+        self.assertGreater(center, 240)
+        self.assertGreater(right_inner, right_edge)
+
+        effect.set_edge_fade(
+            0,
+            100,
+            20,
+            True,
+            True,
+            ((0.0, 0.0), (0.5, 0.25), (1.0, 1.0)),
+        )
+        app.processEvents()
+        custom_image = chip.grab().toImage()
+        self.assertLess(
+            custom_image.pixelColor(10, custom_image.height() // 2).alpha(),
+            image.pixelColor(10, image.height() // 2).alpha(),
+        )
+        chip.deleteLater()
 
     def test_dragdrop_invalid_data_is_ignored(self):
         handler = DragDropHandler(tempfile.mkdtemp())
