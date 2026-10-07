@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Lock
 from time import monotonic
 
-from PySide6.QtCore import QObject, QBuffer, Signal
+from PySide6.QtCore import QObject, QBuffer, Signal, Slot, QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QClipboard
 
@@ -46,6 +46,10 @@ class ClipboardManager(QObject):
         self._clipboard_image_snapshot_hash = None
         self._image_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="copypin-image")
         self._image_lock = Lock()
+        self._clipboard_change_timer = QTimer(self)
+        self._clipboard_change_timer.setSingleShot(True)
+        self._clipboard_change_timer.setInterval(200)
+        self._clipboard_change_timer.timeout.connect(self._process_clipboard_change)
         self.clipboard.dataChanged.connect(self.on_data_changed)
 
     def get_db(self):
@@ -148,11 +152,24 @@ class ClipboardManager(QObject):
         self._clipboard_image_snapshot_hash = None
         self.clipboard.clear(QClipboard.Clipboard)
 
+    @Slot()
     @safe_slot("Failed to process clipboard change")
     def on_data_changed(self):
         if getattr(self, "_ignore_next_count", 0) > 0:
             self._ignore_next_count -= 1
             return
+
+        # Design tools often publish several clipboard formats in sequence.
+        # Wait for the burst to settle, then inspect the final MIME payload once.
+        if self.sender() is self.clipboard:
+            self._clipboard_change_timer.start()
+            return
+
+        # Keep direct calls useful for integrations and unit-level callers.
+        self._process_clipboard_change()
+
+    @safe_slot("Failed to process clipboard change")
+    def _process_clipboard_change(self):
 
         mime = self.clipboard.mimeData()
         if mime.hasImage():
@@ -229,6 +246,9 @@ class ClipboardManager(QObject):
         raw_text = mime.text()
         self._clipboard_image_snapshot = None
         self._clipboard_image_snapshot_hash = None
+        if self._is_vector_markup(raw_text, mime):
+            self._last_text = raw_text
+            return
         if self.enforce_size_limit and (is_oversized_text(raw_text) or (
             mime.hasHtml() and is_oversized_text(mime.html())
         )):
@@ -255,6 +275,16 @@ class ClipboardManager(QObject):
                 self.text_copied.emit(text)
         except Exception:
             log_exception("Failed to store text clipboard item")
+
+    @staticmethod
+    def _is_vector_markup(text, mime):
+        sample = str(text).lstrip()[:20000].lower()
+        formats = " ".join(str(item).lower() for item in mime.formats())
+        return (
+            (sample.startswith("<?xml") and "<svg" in sample)
+            or sample.startswith("<svg")
+            or ("svg" in formats and ("<?xml" in sample or "<svg" in sample))
+        )
 
     def _process_image(self, image, image_hash=None, reserved=False, source_size_bytes=None):
         try:
@@ -364,6 +394,7 @@ class ClipboardManager(QObject):
         return None
 
     def close(self):
+        self._clipboard_change_timer.stop()
         try:
             self.clipboard.dataChanged.disconnect(self.on_data_changed)
         except (RuntimeError, TypeError):
