@@ -54,11 +54,11 @@
   },
 
   "context_menu": {
-    "background": "rgba(20, 20, 20, 1)",
+    "background": "rgba(200, 200, 200, 1)",
     "border": "rgba(200, 200, 200, 0.09)",
     "hover": "rgba(40, 40, 40, 1)",
     "border_width": 1.2,
-    "border_radius": 50,
+    "border_radius": 100,
     "padding": 6,
     "item_size": 16,
     "item_padding": 5,
@@ -123,6 +123,15 @@
     "border_radius": 12,
     "padding": [10, 12],
     "font_size": 13
+  },
+
+  "text_preview": {
+    "background": "2141414",
+    "text": "#c0c0c0",
+    "selection": "#8F993E",
+    "font_family": "Segoe UI",
+    "font_size": 13,
+    "padding": [12, 12, 12, 12]
   },
 
   "scroll_viewport": {

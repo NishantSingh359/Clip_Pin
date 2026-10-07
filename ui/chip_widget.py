@@ -138,6 +138,7 @@ class ChipWidget(QWidget):
     clear_all_requested = Signal()
     context_action_triggered = Signal()
     image_opening = Signal(str)
+    text_preview_requested = Signal(str)
     favicon_loaded = Signal(bytes)
 
     def __init__(
@@ -146,6 +147,8 @@ class ChipWidget(QWidget):
         min_width=None,
         max_width=None,
         color_preview_enabled=None,
+        text_preview_enabled=False,
+        open_images_on_double_click=True,
         theme=None,
     ):
         super().__init__()
@@ -156,6 +159,8 @@ class ChipWidget(QWidget):
         self.max_width = int(max_width) if max_width is not None else CHIP_MAX_WIDTH
         self.max_width = max(self.max_width, self.min_width)
         self.color_preview_enabled = bool(color_preview_enabled) if color_preview_enabled is not None else COLOR_PREVIEW_ENABLED
+        self.text_preview_enabled = bool(text_preview_enabled)
+        self.open_images_on_double_click = bool(open_images_on_double_click)
         self.clip_index = None
         self.kind = self.detect_kind()
         self.pinned = False
@@ -166,12 +171,12 @@ class ChipWidget(QWidget):
         self._drag_start_position = None
         self._dragging = False
         self._suppress_next_release = False
-        self._image_click_timer = QTimer(self)
-        self._image_click_timer.setSingleShot(True)
+        self._deferred_click_timer = QTimer(self)
+        self._deferred_click_timer.setSingleShot(True)
         # Keep the single-click paste pending until Qt has time to recognize a
         # double-click, with a small margin for queued UI events.
-        self._image_click_timer.setInterval(QApplication.doubleClickInterval() + 50)
-        self._image_click_timer.timeout.connect(lambda: self.paste_requested.emit(self.content))
+        self._deferred_click_timer.setInterval(QApplication.doubleClickInterval() + 50)
+        self._deferred_click_timer.timeout.connect(lambda: self.paste_requested.emit(self.content))
         self._favicon_pixmap = QPixmap()
         self.setObjectName("chip")
 
@@ -399,6 +404,14 @@ class ChipWidget(QWidget):
         self.color_preview_enabled = enabled
         self.kind = self.detect_kind()
         self.update_label()
+
+    def set_text_preview_enabled(self, enabled):
+        self.text_preview_enabled = bool(enabled)
+        if not self.text_preview_enabled and self.kind == "TEXT":
+            self._deferred_click_timer.stop()
+
+    def set_open_images_on_double_click(self, enabled):
+        self.open_images_on_double_click = bool(enabled)
 
     @staticmethod
     def parse_color_code(text):
@@ -824,19 +837,32 @@ class ChipWidget(QWidget):
         ):
             distance = (event.pos() - self._drag_start_position).manhattanLength()
             if distance >= QApplication.startDragDistance():
-                self._image_click_timer.stop()
+                self._deferred_click_timer.stop()
                 self._dragging = True
                 self._start_drag()
         super().mouseMoveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton and self.kind == "IMG":
-            self._image_click_timer.stop()
+            self._deferred_click_timer.stop()
             self._suppress_next_release = True
-            image_path = Path(self.content)
-            if image_path.is_file():
-                self.image_opening.emit(str(image_path))
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(image_path.resolve())))
+            if self.open_images_on_double_click:
+                image_path = Path(self.content)
+                if image_path.is_file():
+                    self.image_opening.emit(str(image_path))
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(image_path.resolve())))
+            else:
+                self._deferred_click_timer.start()
+            event.accept()
+            return
+        if (
+            event.button() == Qt.LeftButton
+            and self.kind == "TEXT"
+            and self.text_preview_enabled
+        ):
+            self._deferred_click_timer.stop()
+            self._suppress_next_release = True
+            self.text_preview_requested.emit(self.content)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -847,7 +873,9 @@ class ChipWidget(QWidget):
                 self._suppress_next_release = False
             elif not self._dragging and not self._is_deleting:
                 if self.kind == "IMG":
-                    self._image_click_timer.start()
+                    self._deferred_click_timer.start()
+                elif self.kind == "TEXT" and self.text_preview_enabled:
+                    self._deferred_click_timer.start()
                 else:
                     self.paste_requested.emit(self.content)
             self._drag_start_position = None

@@ -152,6 +152,14 @@
     ],
     "font_size": 13
   },
+  "text_preview": {
+    "background": "#282a36",
+    "text": "#f8f8f2",
+    "selection": "#bd93f9",
+    "font_family": "Segoe UI",
+    "font_size": 13,
+    "padding": [12, 12, 12, 12]
+  },
   "scroll_viewport": {
     "border_radius": 40
   },

@@ -49,6 +49,7 @@ from ui.chip_bar import ChipBar
 from ui.chip_widget import ChipContextMenu, ChipWidget
 from ui.settings_dialog import SettingsDialog
 from ui.notification_popup import OversizedItemPopup
+from ui.text_preview_dialog import TextPreviewDialog
 from ui.animations import fade, parse_color
 from ui.theme_manager import ThemeManager, get_theme_value, set_active_theme
 from animation_config import (
@@ -176,6 +177,8 @@ class MainWindow(QWidget):
         self.hide_on_paste_enabled = HIDE_ON_PASTE
         self.clip_indexing_enabled = clip_indexing
         self.color_preview_enabled = COLOR_PREVIEW_ENABLED
+        self.text_preview_on_double_click_enabled = False
+        self.open_images_on_double_click_enabled = True
         self.prevent_oversize_items_enabled = True
         self.show_oversize_warning_enabled = True
         self.close_to_tray_enabled = True
@@ -188,6 +191,7 @@ class MainWindow(QWidget):
         self._next_chip_number = 1
         self._settings_dialog = None
         self._oversized_item_popup = None
+        self._text_preview_dialog = None
         self._shadow_margin = max(
             0,
             int(
@@ -375,10 +379,13 @@ class MainWindow(QWidget):
             self.chip_min_width,
             self.chip_max_width,
             color_preview_enabled=self.color_preview_enabled,
+            text_preview_enabled=self.text_preview_on_double_click_enabled,
+            open_images_on_double_click=self.open_images_on_double_click_enabled,
             theme=self.theme,
         )
         self._assign_chip_number(chip)
         chip.paste_requested.connect(self.paste_clip)
+        chip.text_preview_requested.connect(self._show_text_preview)
         chip.image_opening.connect(self.clipboard_manager.ignore_image_capture)
         chip.copy_again_requested.connect(self.copy_again_clip)
         chip.delete_requested.connect(self.remove_clip)
@@ -740,6 +747,40 @@ class MainWindow(QWidget):
             chip.set_color_preview_enabled(self.color_preview_enabled)
         self._save_context_menu_settings()
 
+    def set_text_preview_on_double_click_enabled(self, enabled):
+        self.text_preview_on_double_click_enabled = bool(enabled)
+        for chip in self.chips_by_content.values():
+            chip.set_text_preview_enabled(self.text_preview_on_double_click_enabled)
+        self._save_context_menu_settings()
+
+    def set_open_images_on_double_click_enabled(self, enabled):
+        self.open_images_on_double_click_enabled = bool(enabled)
+        for chip in self.chips_by_content.values():
+            chip.set_open_images_on_double_click(self.open_images_on_double_click_enabled)
+        self._save_context_menu_settings()
+
+    @Slot(str)
+    def _show_text_preview(self, text):
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        available_geometry = screen.availableGeometry() if screen is not None else None
+        if self._text_preview_dialog is not None:
+            try:
+                self._text_preview_dialog.close()
+            except RuntimeError:
+                self._text_preview_dialog = None
+        self._text_preview_dialog = TextPreviewDialog(
+            text, self.theme, available_geometry
+        )
+        preview_dialog = self._text_preview_dialog
+        self._text_preview_dialog.destroyed.connect(
+            lambda _object=None: self._clear_text_preview_reference(preview_dialog)
+        )
+        self._text_preview_dialog.show()
+
+    def _clear_text_preview_reference(self, preview_dialog):
+        if self._text_preview_dialog is preview_dialog:
+            self._text_preview_dialog = None
+
     def set_oversize_warning_enabled(self, enabled):
         self.show_oversize_warning_enabled = bool(enabled) and self.prevent_oversize_items_enabled
         self._save_context_menu_settings()
@@ -787,6 +828,11 @@ class MainWindow(QWidget):
             self._apply_empty_theme()
         if self._settings_dialog is not None:
             self._settings_dialog.set_theme(self.theme)
+        if self._text_preview_dialog is not None:
+            try:
+                self._text_preview_dialog.set_theme(self.theme)
+            except RuntimeError:
+                self._text_preview_dialog = None
 
     def _apply_empty_theme(self):
         empty_theme = self.theme.get("empty", {})
@@ -839,6 +885,18 @@ class MainWindow(QWidget):
             self.hide_on_paste_enabled = bool(settings.get("hide_on_paste_enabled", self.hide_on_paste_enabled))
             self.clip_indexing_enabled = bool(settings.get("clip_indexing_enabled", self.clip_indexing_enabled))
             self.color_preview_enabled = bool(settings.get("color_preview_enabled", self.color_preview_enabled))
+            self.text_preview_on_double_click_enabled = bool(
+                settings.get(
+                    "text_preview_on_double_click_enabled",
+                    self.text_preview_on_double_click_enabled,
+                )
+            )
+            self.open_images_on_double_click_enabled = bool(
+                settings.get(
+                    "open_images_on_double_click_enabled",
+                    self.open_images_on_double_click_enabled,
+                )
+            )
             self.prevent_oversize_items_enabled = bool(
                 settings.get("prevent_oversize_items_enabled", self.prevent_oversize_items_enabled)
             )
@@ -886,6 +944,8 @@ class MainWindow(QWidget):
                         "hide_on_paste_enabled": self.hide_on_paste_enabled,
                         "clip_indexing_enabled": self.clip_indexing_enabled,
                         "color_preview_enabled": self.color_preview_enabled,
+                        "text_preview_on_double_click_enabled": self.text_preview_on_double_click_enabled,
+                        "open_images_on_double_click_enabled": self.open_images_on_double_click_enabled,
                         "prevent_oversize_items_enabled": self.prevent_oversize_items_enabled,
                         "show_oversize_warning_enabled": self.show_oversize_warning_enabled,
                         "close_to_tray_enabled": self.close_to_tray_enabled,
@@ -933,6 +993,8 @@ class MainWindow(QWidget):
             hide_on_paste=self.hide_on_paste_enabled,
             show_clip_indexes=self.clip_indexing_enabled,
             color_preview_enabled=self.color_preview_enabled,
+            text_preview_on_double_click=self.text_preview_on_double_click_enabled,
+            open_images_on_double_click=self.open_images_on_double_click_enabled,
             prevent_oversize_items=self.prevent_oversize_items_enabled,
             show_oversize_warning=self.show_oversize_warning_enabled,
             close_to_tray=self.close_to_tray_enabled,
@@ -948,6 +1010,8 @@ class MainWindow(QWidget):
             on_hide_on_paste=self.set_hide_on_paste_enabled,
             on_show_clip_indexes=self.set_clip_indexing_enabled,
             on_color_preview=self.set_color_preview_enabled,
+            on_text_preview_on_double_click=self.set_text_preview_on_double_click_enabled,
+            on_open_images_on_double_click=self.set_open_images_on_double_click_enabled,
             on_prevent_oversize_items=self.set_oversize_prevention_enabled,
             on_oversize_warning=self.set_oversize_warning_enabled,
             on_close_to_tray=self.set_close_to_tray_enabled,

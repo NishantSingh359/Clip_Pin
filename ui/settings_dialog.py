@@ -30,6 +30,8 @@ class SettingsDialog(QDialog):
         hide_on_paste,
         show_clip_indexes,
         color_preview_enabled,
+        text_preview_on_double_click,
+        open_images_on_double_click,
         prevent_oversize_items,
         show_oversize_warning,
         close_to_tray,
@@ -45,6 +47,8 @@ class SettingsDialog(QDialog):
         on_hide_on_paste,
         on_show_clip_indexes,
         on_color_preview,
+        on_text_preview_on_double_click,
+        on_open_images_on_double_click,
         on_prevent_oversize_items,
         on_oversize_warning,
         on_close_to_tray,
@@ -96,6 +100,18 @@ class SettingsDialog(QDialog):
         )
         self.color_preview = self._add_checkbox(
             layout, "Show Color Preview", color_preview_enabled, on_color_preview
+        )
+        self.text_preview_on_double_click = self._add_checkbox(
+            layout,
+            "Preview text on double-click",
+            text_preview_on_double_click,
+            on_text_preview_on_double_click,
+        )
+        self.open_images_on_double_click = self._add_checkbox(
+            layout,
+            "Open images on double-click",
+            open_images_on_double_click,
+            on_open_images_on_double_click,
         )
         self.prevent_oversize_items = self._add_checkbox(
             layout, "Prevent items over 5 MB from entering history",
