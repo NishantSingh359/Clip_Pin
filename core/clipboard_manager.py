@@ -1,5 +1,7 @@
 import base64
+import ctypes
 import json
+import os
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
@@ -7,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from time import monotonic
 
-from PySide6.QtCore import QObject, QByteArray, QBuffer, QMimeData, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, QByteArray, QBuffer, QMimeData, Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QClipboard
 
@@ -38,6 +40,8 @@ class ClipboardManager(QObject):
         self._last_image_hash = None
         self._pending_image_hashes = set()
         self._ignored_image_hashes = {}
+        self._ignored_image_fingerprints = []
+        self._ignore_snipping_tool_until = 0.0
         self._paste_image_cache = OrderedDict()
         self._paste_image_cache_bytes = 0
         self._ignore_next_count = 0
@@ -69,17 +73,144 @@ class ClipboardManager(QObject):
     def ignore_image_capture(self, image_path):
         """Ignore clipboard copies of an image opened by an external viewer.
 
-        Queue registration on the image worker before launching the viewer so
-        any clipboard image it publishes is checked against the registered hash.
+        Register exact and perceptual identities before launching the viewer.
+        Snipping Tool can publish the same image after re-encoding or resizing it.
         """
+        self._ignore_snipping_tool_until = monotonic() + 60
+        try:
+            image = QImage(str(image_path))
+            fingerprint = self._image_fingerprint(image)
+            if fingerprint:
+                self._ignored_image_fingerprints.append(
+                    (*fingerprint, self._ignore_snipping_tool_until)
+                )
+        except Exception:
+            log_exception("Failed to fingerprint image opened in external viewer")
         self._image_executor.submit(self._register_ignored_image, str(image_path))
+
+    @staticmethod
+    def _image_fingerprint(image):
+        if image is None or image.isNull():
+            return None
+        sample = image.scaled(8, 8, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        luminance = [
+            (
+                11 * ((sample.pixel(x, y) >> 16) & 0xFF)
+                + 16 * ((sample.pixel(x, y) >> 8) & 0xFF)
+                + 5 * (sample.pixel(x, y) & 0xFF)
+            ) // 32
+            for y in range(8)
+            for x in range(8)
+        ]
+        average = sum(luminance) / len(luminance)
+        fingerprint = sum(1 << index for index, value in enumerate(luminance) if value >= average)
+        aspect_ratio = image.width() / max(1, image.height())
+        return fingerprint, aspect_ratio
+
+    def _matches_ignored_image_fingerprint(self, image):
+        candidate = self._image_fingerprint(image)
+        if candidate is None:
+            return False
+        fingerprint, aspect_ratio = candidate
+        now = monotonic()
+        self._ignored_image_fingerprints = [
+            item for item in self._ignored_image_fingerprints if item[2] >= now
+        ]
+        for known_fingerprint, known_ratio, _ in self._ignored_image_fingerprints:
+            ratio_delta = abs(aspect_ratio - known_ratio) / max(known_ratio, 0.01)
+            bit_delta = (fingerprint ^ known_fingerprint).bit_count()
+            if ratio_delta <= 0.12 and bit_delta <= 10:
+                return True
+        return False
+
+    @staticmethod
+    def _clipboard_owner_is_snipping_tool():
+        """Return whether Snipping Tool currently owns the Windows clipboard."""
+        if os.name != "nt":
+            return False
+
+        process_handle = None
+        try:
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            user32.GetClipboardOwner.restype = ctypes.c_void_p
+            user32.GetWindowThreadProcessId.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_ulong),
+            ]
+            user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+            kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.c_wchar_p,
+                ctypes.POINTER(ctypes.c_ulong),
+            ]
+            kernel32.QueryFullProcessImageNameW.restype = ctypes.c_int
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = ctypes.c_int
+            owner_window = user32.GetClipboardOwner()
+            if not owner_window:
+                return False
+
+            process_id = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(owner_window, ctypes.byref(process_id))
+            if not process_id.value:
+                return False
+
+            process_handle = kernel32.OpenProcess(0x1000, False, process_id.value)
+            if not process_handle:
+                return False
+
+            executable_path = ctypes.create_unicode_buffer(32768)
+            path_length = ctypes.c_ulong(len(executable_path))
+            if not kernel32.QueryFullProcessImageNameW(
+                process_handle, 0, executable_path, ctypes.byref(path_length)
+            ):
+                return False
+
+            process_name = os.path.basename(executable_path.value).casefold()
+            return process_name in {"snippingtool.exe", "screenclippinghost.exe"}
+        except (AttributeError, OSError, TypeError, ValueError):
+            return False
+        finally:
+            if process_handle:
+                try:
+                    ctypes.windll.kernel32.CloseHandle(process_handle)
+                except (AttributeError, OSError):
+                    pass
+
+    @classmethod
+    def _snipping_tool_is_active_or_clipboard_owner(cls):
+        if cls._clipboard_owner_is_snipping_tool():
+            return True
+        if os.name != "nt":
+            return False
+        try:
+            user32 = ctypes.windll.user32
+            user32.GetForegroundWindow.restype = ctypes.c_void_p
+            user32.GetWindowTextW.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_wchar_p,
+                ctypes.c_int,
+            ]
+            user32.GetWindowTextW.restype = ctypes.c_int
+            window = user32.GetForegroundWindow()
+            if not window:
+                return False
+            title = ctypes.create_unicode_buffer(512)
+            user32.GetWindowTextW(window, title, len(title))
+            return "snipping tool" in title.value.casefold()
+        except (AttributeError, OSError, TypeError, ValueError):
+            return False
 
     def _register_ignored_image(self, image_path):
         try:
             image = QImage(image_path)
             image_hash = self._hash_image(image) if not image.isNull() else None
             if image_hash:
-                expires_at = monotonic() + 30
+                expires_at = monotonic() + 60
                 self._ignored_image_hashes = {
                     known_hash: expiry
                     for known_hash, expiry in self._ignored_image_hashes.items()
@@ -203,6 +334,17 @@ class ClipboardManager(QObject):
                 return
             self._clipboard_image_snapshot = image
             self._clipboard_image_snapshot_hash = None
+
+            if self._matches_ignored_image_fingerprint(image):
+                self._last_image_cache_key = image.cacheKey()
+                return
+
+            if (
+                monotonic() <= self._ignore_snipping_tool_until
+                and self._snipping_tool_is_active_or_clipboard_owner()
+            ):
+                self._last_image_cache_key = image.cacheKey()
+                return
 
             cache_key = image.cacheKey()
             if cache_key == self._last_image_cache_key:
