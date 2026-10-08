@@ -20,7 +20,7 @@ from config import DB_BUSY_TIMEOUT_MS, DB_RETRY_DELAY_MS, DB_WRITE_RETRIES
 
 DB_DIR = "data"
 DB_NAME = "clips.db"
-APP_DATA_DIR = "Copy Pin"
+APP_DATA_DIR = "DockPaste"
 
 
 def get_db_path(base_dir=None):

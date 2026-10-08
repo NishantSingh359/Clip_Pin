@@ -229,6 +229,12 @@ class MainWindow(QWidget):
         self.paste_controller = PasteController()
         self.dragdrop_handler = DragDropHandler(APP_STORAGE_DIR)
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
+        # Start each session without records left by an unclean shutdown.
+        try:
+            self.clipboard_manager.get_db().clear()
+            self.clipboard_manager.image_store.clear_thumbnails()
+        except Exception:
+            log_exception("Failed to clear clipboard history on startup")
         self.dragdrop_handler.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.text_copied.connect(self.add_clip)
@@ -1112,7 +1118,7 @@ class MainWindow(QWidget):
                     script_path = Path(__file__).resolve().parents[1] / "main.py"
                     command = f'"{sys.executable}" "{script_path}"'
                 winreg.SetValueEx(run_key, "DockPaste", 0, winreg.REG_SZ, command)
-            for value_name in ("Copy Pin", "ClipFlow", "DockPaste"):
+            for value_name in ("ClipFlow", "DockPaste"):
                 if enabled and value_name == "DockPaste":
                     continue
                 try:
@@ -1122,12 +1128,28 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         if self.close_to_tray_enabled:
+            self.clear_history_on_close()
             event.ignore()
             self.hide_shelf(force=True)
             return
         self.tray_icon.hide()
         event.accept()
         QApplication.quit()
+
+    def clear_history_on_close(self):
+        """Remove stored and visible clipboard history when the shelf is closed."""
+        try:
+            self.clipboard_manager.get_db().clear()
+        except Exception:
+            log_exception("Failed to clear clipboard history on close")
+        try:
+            self.clipboard_manager.image_store.clear_thumbnails()
+        except Exception:
+            log_exception("Failed to clear stored clipboard images on close")
+
+        chips = list(self.chips_by_content.values())
+        self.chips_by_content.clear()
+        self._remove_chip_widgets(chips)
 
     def _cursor_over_chip_context_menu(self, cursor):
         popup = self._active_chip_context_menu()
@@ -1369,14 +1391,7 @@ class MainWindow(QWidget):
             self.clipboard_manager.close()
         except Exception:
             log_exception("Failed to shut down clipboard manager")
-        try:
-            self.clipboard_manager.get_db().clear()
-        except Exception:
-            log_exception("Failed to clear clipboard history on shutdown")
-        try:
-            self.clipboard_manager.image_store.clear_thumbnails()
-        except Exception:
-            log_exception("Failed to clear stored clipboard images on shutdown")
+        self.clear_history_on_close()
         try:
             shutdown_favicon_service()
         except Exception:

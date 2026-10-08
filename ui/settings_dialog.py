@@ -129,6 +129,10 @@ class SettingsDialog(QDialog):
         self.close_to_tray = self._add_checkbox(
             layout, "Keep Running When Closed", close_to_tray, on_close_to_tray
         )
+        self.close_to_tray.setToolTip(
+            "Closing the shelf hides it in the system tray and keeps clipboard monitoring active. "
+            "The current history is cleared when the shelf is closed. Use Exit in the tray menu to quit."
+        )
         self.start_with_windows = self._add_checkbox(
             layout, "Start with Windows", start_with_windows, on_start_with_windows
         )

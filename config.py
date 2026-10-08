@@ -7,12 +7,9 @@ from pathlib import Path
 # -----------------------------------------------------------------------------
 
 APP_NAME = "DockPaste"
-APP_STORAGE_NAME = "Copy Pin"  # Preserve the existing user data and settings path.
 BASE_DIR = Path(__file__).resolve().parent
-APP_STORAGE_DIR = (
-    Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or BASE_DIR)
-    / APP_STORAGE_NAME
-)
+APP_STORAGE_ROOT = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or BASE_DIR)
+APP_STORAGE_DIR = APP_STORAGE_ROOT / APP_NAME
 
 THUMBNAILS_DIR = "thumbnails"
 THUMBNAIL_RETENTION_DAYS = 30

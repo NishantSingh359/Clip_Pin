@@ -48,7 +48,7 @@ This is normal for unsigned desktop applications.
 
 Open the DockPaste system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
 
-To keep DockPaste running after closing its shelf, enable **Keep running when closed** in Settings. Use **Exit** in the tray menu to fully quit the application.
+Enable **Keep Running When Closed** in Settings to hide the shelf in the system tray while DockPaste keeps monitoring the clipboard. Closing the shelf clears its current history; new clips collected while it runs can appear when you reopen it. Choose **Exit** in the tray menu to stop DockPaste completely. The history is also cleared when the app exits, so each launch starts without previous history.
 ---
 
 ### Build The Windows Installer

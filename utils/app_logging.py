@@ -14,7 +14,7 @@ def setup_logging(base_dir):
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
-        log_dir = Path(tempfile.gettempdir()) / "Copy Pin" / "logs"
+        log_dir = Path(tempfile.gettempdir()) / "DockPaste" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "copypin.log"
 

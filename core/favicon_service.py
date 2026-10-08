@@ -17,7 +17,7 @@ class FaviconService:
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
-            self.cache_dir = Path(tempfile.gettempdir()) / "Copy Pin" / FAVICON_CACHE_DIR
+            self.cache_dir = Path(tempfile.gettempdir()) / "DockPaste" / FAVICON_CACHE_DIR
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=FAVICON_WORKERS, thread_name_prefix="copypin-favicon")
         self._memory_cache = {}
