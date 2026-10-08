@@ -766,7 +766,7 @@ class MainWindow(QWidget):
 
     @Slot(str)
     def _show_text_preview(self, text):
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen = QApplication.primaryScreen()
         available_geometry = screen.availableGeometry() if screen is not None else None
         if self._text_preview_dialog is not None:
             try:
@@ -1343,12 +1343,11 @@ class MainWindow(QWidget):
         self.trigger_right = trigger_center + trigger_half_width
 
     def screen_for_hint(self, monitor_hint):
-        if monitor_hint == "active":
-            screen = self.active_window_screen()
-            if screen:
-                return screen
-
-        return QApplication.screenAt(QCursor.pos()) or self.active_window_screen() or QApplication.primaryScreen()
+        return (
+            QApplication.primaryScreen()
+            or QApplication.screenAt(QCursor.pos())
+            or self.active_window_screen()
+        )
 
     def active_window_screen(self):
         if not sys.platform.startswith("win"):

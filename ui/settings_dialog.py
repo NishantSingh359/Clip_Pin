@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -184,6 +185,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(shelf_group)
 
         self.set_theme(theme)
+        primary_screen = QApplication.primaryScreen()
+        if primary_screen is not None:
+            available_geometry = primary_screen.availableGeometry()
+            self.adjustSize()
+            self.move(
+                available_geometry.center().x() - self.width() // 2,
+                available_geometry.center().y() - self.height() // 2,
+            )
 
     def set_theme(self, theme):
         self.theme = theme

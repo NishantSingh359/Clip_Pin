@@ -201,6 +201,25 @@ class TestRuntimeSmoke(unittest.TestCase):
         self.assertEqual(window.hidden_pos.y(), fake_screen.geometry().top() - window.height() - 10)
         window.deleteLater()
 
+    def test_screen_selection_always_uses_primary_monitor(self):
+        with patch("ui.main_window.ClipboardManager"), \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            window = MainWindow()
+
+        primary_screen = object()
+        with patch("ui.main_window.QApplication.primaryScreen", return_value=primary_screen), \
+             patch("ui.main_window.QApplication.screenAt") as screen_at, \
+             patch.object(window, "active_window_screen") as active_window_screen:
+            for monitor_hint in ("cursor", "active", None):
+                self.assertIs(window.screen_for_hint(monitor_hint), primary_screen)
+
+        screen_at.assert_not_called()
+        active_window_screen.assert_not_called()
+        window.tray_icon.hide()
+        window.deleteLater()
+
     def test_screen_geometry_sets_a_stable_window_size(self):
         class FakeGeometry:
             def __init__(self, left, top, width, height):

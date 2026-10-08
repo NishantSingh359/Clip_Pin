@@ -1,5 +1,4 @@
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -83,7 +82,7 @@ class OversizedItemPopup(QWidget):
         self.setFixedWidth(width)
         self.adjustSize()
 
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen = QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
             self.move(
