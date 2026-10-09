@@ -2,6 +2,7 @@ import base64
 import ctypes
 import json
 import os
+from html.parser import HTMLParser
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
@@ -325,7 +326,18 @@ class ClipboardManager(QObject):
     def _process_clipboard_change(self):
 
         mime = self.clipboard.mimeData()
-        if mime.hasImage():
+        html_link = self._single_copied_html_link(mime)
+        # Browsers can publish a link as a rich payload that also advertises
+        # image data (for example, a link preview). Treat explicit web URLs as
+        # links before considering the image representation, or the early
+        # image return below silently discards the copied link.
+        has_web_urls = bool(html_link) or (mime.hasUrls() and any(
+            not url.isLocalFile()
+            and url.isValid()
+            and url.scheme().casefold() in {"http", "https", "ftp"}
+            for url in mime.urls()
+        ))
+        if mime.hasImage() and not has_web_urls:
             image = self.clipboard.image()
             if image.isNull():
                 self._clipboard_image_snapshot = None
@@ -396,6 +408,8 @@ class ClipboardManager(QObject):
                 and url.isValid()
                 and url.scheme().casefold() in {"http", "https", "ftp"}
             ]
+            if html_link and html_link not in links:
+                links.append(html_link)
             rejected_oversized_item = False
             if paths or links:
                 for path in paths:
@@ -427,6 +441,22 @@ class ClipboardManager(QObject):
                     self.oversized_item_rejected.emit()
                 return
 
+
+        if html_link:
+            self._clipboard_image_snapshot = None
+            self._clipboard_image_snapshot_hash = None
+            self._clipboard_rich_formats_snapshot = {}
+            if not self.enforce_size_limit or not is_oversized_text(html_link):
+                if html_link != self._last_text:
+                    self._last_text = html_link
+                    try:
+                        self.db.insert_with_type(html_link, "link")
+                        self.text_copied.emit(html_link)
+                    except Exception:
+                        log_exception("Failed to store clipboard HTML link")
+            else:
+                self.oversized_item_rejected.emit()
+            return
 
         if not mime.hasText():
             self._clipboard_image_snapshot = None
@@ -469,6 +499,53 @@ class ClipboardManager(QObject):
                 self.text_copied.emit(text)
         except Exception:
             log_exception("Failed to store text clipboard item")
+
+    @staticmethod
+    def _single_copied_html_link(mime):
+        """Extract a link from browser 'copy link' HTML, without importing page links."""
+        if not mime.hasHtml():
+            return None
+
+        class AnchorParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.hrefs = []
+                self.visible_text = []
+                self._inside_anchor = False
+
+            def handle_starttag(self, tag, attrs):
+                if tag.casefold() == "a":
+                    self._inside_anchor = True
+                    href = dict(attrs).get("href")
+                    if href:
+                        self.hrefs.append(href.strip())
+
+            def handle_endtag(self, tag):
+                if tag.casefold() == "a":
+                    self._inside_anchor = False
+
+            def handle_data(self, data):
+                if self._inside_anchor:
+                    self.visible_text.append(data)
+
+        parser = AnchorParser()
+        try:
+            parser.feed(mime.html())
+        except Exception:
+            return None
+        if len(parser.hrefs) != 1:
+            return None
+
+        from PySide6.QtCore import QUrl
+
+        url = QUrl(parser.hrefs[0])
+        if not url.isValid() or url.scheme().casefold() not in {"http", "https", "ftp"}:
+            return None
+        selected_text = " ".join(" ".join(parser.visible_text).split())
+        clipboard_text = " ".join(mime.text().split()) if mime.hasText() else ""
+        if selected_text and clipboard_text != selected_text:
+            return None
+        return url.toString()
 
     @staticmethod
     def _is_vector_markup(text, mime):

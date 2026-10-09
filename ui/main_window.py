@@ -370,16 +370,17 @@ class MainWindow(QWidget):
         self.clearMask()
 
     @safe_slot("Failed to add clipboard chip")
-    def add_clip(self, content):
+    def add_clip(self, content, clip_date=None):
+        clip_date = clip_date or date.today().isoformat()
         if (
             self._history_date_filter is not None
-            and self._history_date_filter != date.today().isoformat()
+            and self._history_date_filter != clip_date
         ):
             return
         if content in self.chips_by_content:
             return
 
-        self._clip_dates_by_content[content] = date.today().isoformat()
+        self._clip_dates_by_content[content] = clip_date
         self.add_chip(content)
 
     def set_history_date_filter(self, clip_date):
@@ -404,8 +405,7 @@ class MainWindow(QWidget):
         self._next_chip_number = 1
         for record in records:
             content = record["content"]
-            self._clip_dates_by_content[content] = record["date"]
-            self.add_clip(content)
+            self.add_clip(content, record["date"])
 
     @safe_slot("Failed to create clipboard chip")
     def add_chip(self, content):
