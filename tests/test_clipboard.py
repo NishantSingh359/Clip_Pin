@@ -201,15 +201,36 @@ class TestChipWidget(unittest.TestCase):
             manager = ClipboardManager(temp_dir)
             saved = []
             emitted = []
-            manager.db.insert_with_type = lambda content, clip_type: saved.append((content, clip_type))
+            manager.db.insert_with_type = lambda content, clip_type: saved.append(
+                (content, clip_type)
+            )
             manager.path_copied.connect(emitted.append)
             mime = QMimeData()
             mime.setUrls([QUrl.fromLocalFile(str(file_path))])
             manager.clipboard.setMimeData(mime, QClipboard.Clipboard)
-            app.processEvents()
+            manager._process_clipboard_change()
 
             self.assertEqual(saved, [(str(file_path), "path")])
             self.assertEqual(emitted, [str(file_path)])
+            manager.close()
+
+    def test_copied_website_url_without_plain_text_is_saved_as_link(self):
+        with TemporaryDirectory() as temp_dir:
+            manager = ClipboardManager(temp_dir)
+            saved = []
+            emitted = []
+            manager.db.insert_with_type = lambda content, clip_type: saved.append((content, clip_type))
+            manager.text_copied.connect(emitted.append)
+
+            mime = QMimeData()
+            mime.setUrls([QUrl("https://example.com/article")])
+            mime.hasText = lambda: False
+            mime.text = lambda: ""
+            with patch.object(manager.clipboard, "mimeData", return_value=mime):
+                manager._process_clipboard_change()
+
+            self.assertEqual(saved, [("https://example.com/article", "link")])
+            self.assertEqual(emitted, ["https://example.com/article"])
             manager.close()
 
 

@@ -389,22 +389,41 @@ class ClipboardManager(QObject):
                 for url in mime.urls()
                 if url.isLocalFile() and Path(url.toLocalFile()).exists()
             ]
-            rejected_oversized_path = False
-            if paths:
+            links = [
+                url.toString()
+                for url in mime.urls()
+                if not url.isLocalFile()
+                and url.isValid()
+                and url.scheme().casefold() in {"http", "https", "ftp"}
+            ]
+            rejected_oversized_item = False
+            if paths or links:
                 for path in paths:
                     content = str(path)
                     if self.enforce_size_limit and is_oversized_text(content):
-                        rejected_oversized_path = True
+                        rejected_oversized_item = True
                         continue
                     if self.enforce_size_limit and is_oversized_file(path):
-                        rejected_oversized_path = True
+                        rejected_oversized_item = True
                         continue
                     try:
                         self.db.insert_with_type(content, "path")
                         self.path_copied.emit(content)
                     except Exception:
                         log_exception("Failed to store clipboard path")
-                if rejected_oversized_path:
+                for content in links:
+                    if self.enforce_size_limit and is_oversized_text(content):
+                        rejected_oversized_item = True
+                        continue
+                    if not content or content == self._last_text:
+                        continue
+                    self._last_text = content
+                    try:
+                        self.db.insert_with_type(content, "link")
+                        self.text_copied.emit(content)
+                    except Exception:
+                        log_exception("Failed to store clipboard link")
+                if rejected_oversized_item:
                     self.oversized_item_rejected.emit()
                 return
 
