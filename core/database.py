@@ -3,7 +3,8 @@ Clipboard history database module.
 Manages persistence of clipboard items with SQLite.
 
 Schema:
-    id      - INTEGER PRIMARY KEY AUTOINCREMENT (unique, not null)
+    date    - TEXT: local calendar date of the copied item
+    index   - INTEGER: 1-based order within the date
     type    - TEXT: 'link', 'text', 'path', or 'img'
     content - TEXT: the copied text, link, path, or img file path
 """
@@ -13,6 +14,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import date as local_date
 from pathlib import Path
 
 from config import DB_BUSY_TIMEOUT_MS, DB_RETRY_DELAY_MS, DB_WRITE_RETRIES
@@ -130,6 +132,7 @@ class ClipboardDatabase:
             conn = None
             try:
                 conn = self._get_connection()
+                conn.execute("BEGIN IMMEDIATE")
                 result = operation(conn)
                 conn.commit()
                 return result
@@ -151,24 +154,86 @@ class ClipboardDatabase:
         """Initialize the database schema."""
         conn = self._get_connection()
         try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS clips (
-                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    type    TEXT    NOT NULL,
-                    content TEXT    NOT NULL UNIQUE,
-
-                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_clips_type ON clips(type)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at DESC)
-            """)
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(clips)").fetchall()
+            }
+            if not columns:
+                self._create_clips_table(conn)
+            elif {"date", "index", "type", "content"} - columns:
+                self._migrate_legacy_table(conn)
+            self._create_clips_indexes(conn)
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _create_clips_table(conn, table_name="clips"):
+        conn.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                date TEXT NOT NULL,
+                "index" INTEGER NOT NULL CHECK ("index" >= 1),
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                PRIMARY KEY (date, "index"),
+                UNIQUE (date, content)
+            )
+            """
+        )
+
+    @staticmethod
+    def _create_clips_indexes(conn):
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_type ON clips(type)")
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_clips_date_index ON clips(date DESC, "index" DESC)'
+        )
+
+    def _migrate_legacy_table(self, conn):
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(clips)").fetchall()
+        }
+        if not {"id", "type", "content", "created_at"}.issubset(columns):
+            raise sqlite3.DatabaseError(
+                "Clipboard history table has an unsupported schema; refusing to replace it"
+            )
+
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ALTER TABLE clips RENAME TO clips_legacy")
+        self._create_clips_table(conn)
+        records = conn.execute(
+            """
+            SELECT id, type, content, created_at
+            FROM clips_legacy
+            ORDER BY created_at ASC, id ASC
+            """
+        ).fetchall()
+        next_index_by_date = {}
+        for record in records:
+            clip_date = str(record["created_at"])[:10]
+            try:
+                local_date.fromisoformat(clip_date)
+            except ValueError as exc:
+                raise sqlite3.DatabaseError(
+                    f"Clipboard record {record['id']} has an invalid creation date"
+                ) from exc
+            clip_index = next_index_by_date.get(clip_date, 0) + 1
+            next_index_by_date[clip_date] = clip_index
+            conn.execute(
+                """
+                INSERT INTO clips (rowid, date, "index", type, content)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    record["id"],
+                    clip_date,
+                    clip_index,
+                    record["type"],
+                    record["content"],
+                ),
+            )
+        conn.execute("DROP TABLE clips_legacy")
 
     def insert(self, content: str) -> int | None:
         """
@@ -180,42 +245,41 @@ class ClipboardDatabase:
         Returns:
             The row id of the inserted record, or None if it already exists.
         """
-        clip_type = detect_type(content)
-        def operation(conn):
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO clips (type, content) VALUES (?, ?)",
-                (clip_type, content)
-            )
-            # cursor.rowcount is 0 when INSERT OR IGNORE skips a duplicate
-            return cursor.lastrowid if cursor.rowcount > 0 else None
+        return self.insert_with_type(content, detect_type(content))
 
-        return self._write_with_retry(operation)
+    @staticmethod
+    def _insert_for_today(conn, content, clip_type):
+        clip_date = local_date.today().isoformat()
+        existing = conn.execute(
+            'SELECT rowid FROM clips WHERE date = ? AND content = ?',
+            (clip_date, content),
+        ).fetchone()
+        if existing:
+            return None
+        next_index = conn.execute(
+            'SELECT COALESCE(MAX("index"), 0) + 1 FROM clips WHERE date = ?',
+            (clip_date,),
+        ).fetchone()[0]
+        cursor = conn.execute(
+            'INSERT INTO clips (date, "index", type, content) VALUES (?, ?, ?, ?)',
+            (clip_date, next_index, clip_type, content),
+        )
+        return cursor.lastrowid
 
     def insert_with_type(self, content: str, clip_type: str) -> int | None:
         """
-        Insert a clipboard item with an explicit type.
+        Insert an item with an explicit type and assign its next daily index.
 
-        Args:
-            content: The clipboard content string.
-            clip_type: One of 'link', 'text', 'path'.
-
-        Returns:
-            The row id of the inserted record, or None if it already exists.
+        Returns the compatibility row handle, or None for a duplicate on
+        today's date.
         """
         if clip_type not in ("link", "text", "path", "img"):
             raise ValueError(
                 f"Invalid type '{clip_type}'. Must be 'link', 'text', 'path', or 'img'."
             )
 
-
-
         def operation(conn):
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO clips (type, content) VALUES (?, ?)",
-                (clip_type, content)
-            )
-            # cursor.rowcount is 0 when INSERT OR IGNORE skips a duplicate
-            return cursor.lastrowid if cursor.rowcount > 0 else None
+            return self._insert_for_today(conn, content, clip_type)
 
         return self._write_with_retry(operation)
 
@@ -228,13 +292,51 @@ class ClipboardDatabase:
             offset: Number of records to skip.
 
         Returns:
-            List of dicts with keys: id, type, content, created_at.
+            List of dicts with keys: id, date, index, type, content.
         """
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT id, type, content, created_at FROM clips ORDER BY id DESC LIMIT ? OFFSET ?",
+                """
+                SELECT rowid AS id, date, "index", type, content
+                FROM clips
+                ORDER BY date DESC, "index" DESC
+                LIMIT ? OFFSET ?
+                """,
                 (limit, offset)
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_available_dates(self) -> list[str]:
+        """Return local calendar dates with stored clips, newest first."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT date AS clip_date
+                FROM clips
+                GROUP BY date
+                ORDER BY date DESC
+                """
+            ).fetchall()
+            return [row["clip_date"] for row in rows]
+        finally:
+            conn.close()
+
+    def get_by_date(self, clip_date: str) -> list[dict]:
+        """Retrieve all clips created on a local calendar date, newest first."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT rowid AS id, date, "index", type, content
+                FROM clips
+                WHERE date = ?
+                ORDER BY "index" DESC
+                """,
+                (clip_date,),
             ).fetchall()
             return [dict(row) for row in rows]
         finally:
@@ -250,12 +352,18 @@ class ClipboardDatabase:
             offset: Number of records to skip.
 
         Returns:
-            List of dicts with keys: id, type, content, created_at.
+            List of dicts with keys: id, date, index, type, content.
         """
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT id, type, content, created_at FROM clips WHERE type = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+                """
+                SELECT rowid AS id, date, "index", type, content
+                FROM clips
+                WHERE type = ?
+                ORDER BY date DESC, "index" DESC
+                LIMIT ? OFFSET ?
+                """,
                 (clip_type, limit, offset)
             ).fetchall()
             return [dict(row) for row in rows]
@@ -275,7 +383,11 @@ class ClipboardDatabase:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT id, type, content, created_at FROM clips WHERE id = ?",
+                """
+                SELECT rowid AS id, date, "index", type, content
+                FROM clips
+                WHERE rowid = ?
+                """,
                 (record_id,)
             ).fetchone()
             return dict(row) if row else None
@@ -291,13 +403,19 @@ class ClipboardDatabase:
             limit: Maximum number of records to return.
 
         Returns:
-            List of dicts with keys: id, type, content, created_at.
+            List of dicts with keys: id, date, index, type, content.
         """
 
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT id, type, content, created_at FROM clips WHERE content LIKE ? ORDER BY id DESC LIMIT ?",
+                """
+                SELECT rowid AS id, date, "index", type, content
+                FROM clips
+                WHERE content LIKE ?
+                ORDER BY date DESC, "index" DESC
+                LIMIT ?
+                """,
                 (f"%{query}%", limit)
             ).fetchall()
             return [dict(row) for row in rows]
@@ -324,23 +442,74 @@ class ClipboardDatabase:
             True if a record was deleted, False otherwise.
         """
         def operation(conn):
-            cursor = conn.execute("DELETE FROM clips WHERE id = ?", (record_id,))
+            record = conn.execute(
+                "SELECT date FROM clips WHERE rowid = ?", (record_id,)
+            ).fetchone()
+            cursor = conn.execute("DELETE FROM clips WHERE rowid = ?", (record_id,))
+            if record and cursor.rowcount:
+                self._reindex_date(conn, record["date"])
             return cursor.rowcount > 0
 
         return self._write_with_retry(operation)
 
-    def delete_by_content(self, content: str) -> bool:
+    @staticmethod
+    def _reindex_date(conn, clip_date):
+        rows = conn.execute(
+            'SELECT rowid FROM clips WHERE date = ? ORDER BY "index"',
+            (clip_date,),
+        ).fetchall()
+        if not rows:
+            return
+
+        offset = len(rows) + conn.execute(
+            'SELECT COALESCE(MAX("index"), 0) FROM clips WHERE date = ?',
+            (clip_date,),
+        ).fetchone()[0]
+        conn.execute(
+            'UPDATE clips SET "index" = "index" + ? WHERE date = ?',
+            (offset, clip_date),
+        )
+        for new_index, row in enumerate(rows, start=1):
+            conn.execute(
+                'UPDATE clips SET "index" = ? WHERE rowid = ?',
+                (new_index, row["rowid"]),
+            )
+
+    def delete_by_content(self, content: str, clip_date: str | None = None) -> bool:
         """
         Delete a clipboard record by its content.
 
         Args:
-            content: The content to match and delete.
+            content:             The content to match and delete, optionally on a specific date.
 
         Returns:
             True if a record was deleted, False otherwise.
         """
         def operation(conn):
-            cursor = conn.execute("DELETE FROM clips WHERE content = ?", (content,))
+            if clip_date is None:
+                record = conn.execute(
+                    """
+                    SELECT rowid, date FROM clips
+                    WHERE content = ?
+                    ORDER BY date DESC, "index" DESC
+                    LIMIT 1
+                    """,
+                    (content,),
+                ).fetchone()
+                if record is None:
+                    return False
+                cursor = conn.execute(
+                    "DELETE FROM clips WHERE rowid = ?", (record["rowid"],)
+                )
+                if cursor.rowcount:
+                    self._reindex_date(conn, record["date"])
+            else:
+                cursor = conn.execute(
+                    'DELETE FROM clips WHERE date = ? AND content = ?',
+                    (clip_date, content),
+                )
+                if cursor.rowcount:
+                    self._reindex_date(conn, clip_date)
             return cursor.rowcount > 0
 
         return self._write_with_retry(operation)
@@ -349,7 +518,7 @@ class ClipboardDatabase:
         """
         Delete clipboard records older than the specified number of days.
         
-        Uses the created_at timestamp to determine age. Records whose
+        Uses the local calendar date to determine age. Records whose
         creation date is older than 'retention_days' days are removed.
         
         Args:
@@ -360,8 +529,11 @@ class ClipboardDatabase:
         """
         def operation(conn):
             cursor = conn.execute(
-                "DELETE FROM clips WHERE created_at < datetime('now', 'localtime', ?)",
-                (f"-{retention_days} days",)
+                """
+                DELETE FROM clips
+                WHERE date < date('now', 'localtime', ?)
+                """,
+                (f"-{retention_days} days",),
             )
             return cursor.rowcount
 
@@ -376,7 +548,6 @@ class ClipboardDatabase:
         """
         def operation(conn):
             cursor = conn.execute("DELETE FROM clips")
-            conn.execute("DELETE FROM sqlite_sequence WHERE name = 'clips'")
             return cursor.rowcount
 
         return self._write_with_retry(operation)

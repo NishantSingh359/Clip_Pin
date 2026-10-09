@@ -3,9 +3,11 @@ Tests for the clipboard history database module.
 """
 
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import date
 from unittest.mock import patch
 from pathlib import Path
 
@@ -86,27 +88,48 @@ class TestClipboardDatabase(unittest.TestCase):
         db_path = Path(self.temp_dir) / "data" / "clips.db"
         self.assertTrue(db_path.exists(), "Database file should exist")
 
+    def test_records_survive_database_reopen(self):
+        self.db.insert("persisted clipboard item")
+
+        reopened_db = ClipboardDatabase(self.temp_dir)
+
+        self.assertEqual(
+            [record["content"] for record in reopened_db.get_all()],
+            ["persisted clipboard item"],
+        )
+
     def test_schema_has_required_columns(self):
-        """Test that the clips table has id, type, content columns."""
+        """The daily date/index pair is the non-null composite primary key."""
         conn = self.db._get_connection()
         try:
             info = conn.execute("PRAGMA table_info(clips)").fetchall()
-            column_names = [row["name"] for row in info]
-
-            self.assertIn("id", column_names)
-            self.assertIn("type", column_names)
-            self.assertIn("content", column_names)
-            self.assertIn("created_at", column_names)
+            self.assertEqual(
+                [row["name"] for row in info],
+                ["date", "index", "type", "content"],
+            )
+            self.assertEqual([row["pk"] for row in info], [1, 2, 0, 0])
+            self.assertTrue(all(row["notnull"] for row in info))
         finally:
             conn.close()
 
-    def test_id_is_primary_key(self):
-        """Test that id is a primary key and auto-increment."""
+    def test_date_and_index_are_composite_primary_key(self):
+        """Date and daily index together form the primary key."""
         conn = self.db._get_connection()
         try:
             info = conn.execute("PRAGMA table_info(clips)").fetchall()
-            id_col = next(r for r in info if r["name"] == "id")
-            self.assertEqual(id_col["pk"], 1, "id should be primary key")
+            self.assertEqual(next(r for r in info if r["name"] == "date")["pk"], 1)
+            self.assertEqual(next(r for r in info if r["name"] == "index")["pk"], 2)
+        finally:
+            conn.close()
+
+    def test_index_cannot_be_null(self):
+        conn = self.db._get_connection()
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    'INSERT INTO clips (date, "index", type, content) VALUES (?, ?, ?, ?)',
+                    ("2026-10-09", None, "text", "invalid"),
+                )
         finally:
             conn.close()
 
@@ -131,12 +154,83 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertEqual(record["type"], "path")
 
     def test_insert_duplicate_content(self):
-        """Test that duplicate content is ignored."""
+        """Duplicate content is ignored within the same date."""
         row_id1 = self.db.insert("unique content")
         row_id2 = self.db.insert("unique content")
         self.assertIsNotNone(row_id1)
         self.assertIsNone(row_id2)
         self.assertEqual(self.db.count(), 1)
+
+    def test_daily_indexes_start_at_one_and_reset_each_day(self):
+        with patch("core.database.local_date") as mocked_date:
+            mocked_date.today.return_value = date(2026, 10, 9)
+            first_id = self.db.insert("first daily clip")
+            second_id = self.db.insert("second daily clip")
+            mocked_date.today.return_value = date(2026, 10, 10)
+            next_day_id = self.db.insert("next day clip")
+
+        first_day = self.db.get_by_date("2026-10-09")
+        next_day = self.db.get_by_date("2026-10-10")
+        self.assertEqual(
+            [(row["index"], row["content"]) for row in reversed(first_day)],
+            [(1, "first daily clip"), (2, "second daily clip")],
+        )
+        self.assertEqual(next_day[0]["index"], 1)
+        self.assertEqual(len({first_id, second_id, next_day_id}), 3)
+
+    def test_duplicate_content_is_allowed_on_another_date(self):
+        with patch("core.database.local_date") as mocked_date:
+            mocked_date.today.return_value = date(2026, 10, 9)
+            self.db.insert("repeat clip")
+            mocked_date.today.return_value = date(2026, 10, 10)
+            self.db.insert("repeat clip")
+
+        self.assertEqual(self.db.count(), 2)
+
+    def test_legacy_schema_migrates_preserving_dates_and_order(self):
+        with tempfile.TemporaryDirectory() as legacy_dir:
+            legacy_path = Path(legacy_dir) / "data" / "clips.db"
+            legacy_path.parent.mkdir()
+            conn = sqlite3.connect(legacy_path)
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE clips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        content TEXT NOT NULL UNIQUE,
+                        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                    )
+                    """
+                )
+                conn.executemany(
+                    "INSERT INTO clips (id, type, content, created_at) VALUES (?, ?, ?, ?)",
+                    [
+                        (1, "text", "yesterday", "2026-10-08 23:59:59"),
+                        (2, "link", "today first", "2026-10-09 08:00:00"),
+                        (3, "text", "today second", "2026-10-09 09:00:00"),
+                    ],
+                )
+                conn.execute("CREATE INDEX idx_clips_type ON clips(type)")
+                conn.execute(
+                    "CREATE INDEX idx_clips_created_at ON clips(created_at DESC)"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            migrated_db = ClipboardDatabase(legacy_dir)
+            self.assertEqual(
+                [
+                    (row["date"], row["index"], row["content"])
+                    for row in migrated_db.get_all()
+                ],
+                [
+                    ("2026-10-09", 2, "today second"),
+                    ("2026-10-09", 1, "today first"),
+                    ("2026-10-08", 1, "yesterday"),
+                ],
+            )
 
     def test_insert_with_explicit_type(self):
         """Test inserting with an explicit type override."""
@@ -215,6 +309,31 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertEqual(len(paths), 1)
         self.assertEqual(paths[0]["content"], "C:\\path")
 
+    def test_history_dates_and_date_filter(self):
+        conn = self.db._get_connection()
+        try:
+            conn.executemany(
+                'INSERT INTO clips (date, "index", type, content) VALUES (?, ?, ?, ?)',
+                [
+                    ("2026-10-08", 1, "text", "yesterday clip"),
+                    ("2026-10-09", 1, "link", "today clip"),
+                    ("2026-10-09", 2, "text", "today later clip"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            self.db.get_available_dates(),
+            ["2026-10-09", "2026-10-08"],
+        )
+        today = self.db.get_by_date("2026-10-09")
+        self.assertEqual(
+            [record["content"] for record in today],
+            ["today later clip", "today clip"],
+        )
+
     def test_get_by_id_found(self):
         """Test get_by_id returns the correct record."""
         row_id = self.db.insert("find me")
@@ -273,6 +392,22 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertTrue(deleted)
         self.assertEqual(self.db.count(), 0)
 
+    def test_deleting_clip_reindexes_that_day_without_gaps(self):
+        with patch("core.database.local_date") as mocked_date:
+            mocked_date.today.return_value = date(2026, 10, 9)
+            first_id = self.db.insert("first")
+            self.db.insert("middle")
+            self.db.insert("last")
+
+        self.db.delete(first_id)
+
+        self.assertEqual(
+            [(row["index"], row["content"]) for row in reversed(
+                self.db.get_by_date("2026-10-09")
+            )],
+            [(1, "middle"), (2, "last")],
+        )
+
     def test_delete_nonexistent_id(self):
         """Test deleting a non-existent id returns False."""
         result = self.db.delete(9999)
@@ -285,6 +420,21 @@ class TestClipboardDatabase(unittest.TestCase):
         deleted = self.db.delete_by_content("delete by content")
         self.assertTrue(deleted)
         self.assertEqual(self.db.count(), 0)
+
+    def test_delete_by_content_only_deletes_requested_date(self):
+        with patch("core.database.local_date") as mocked_date:
+            mocked_date.today.return_value = date(2026, 10, 9)
+            self.db.insert("same across dates")
+            mocked_date.today.return_value = date(2026, 10, 10)
+            self.db.insert("same across dates")
+
+        self.assertTrue(
+            self.db.delete_by_content("same across dates", "2026-10-09")
+        )
+        self.assertEqual(
+            [record["date"] for record in self.db.search("same across dates")],
+            ["2026-10-10"],
+        )
 
     def test_delete_nonexistent_content(self):
         """Test deleting non-existent content returns False."""
@@ -330,6 +480,9 @@ class TestClipboardDatabase(unittest.TestCase):
         attempts = {"count": 0}
 
         class FakeConnection:
+            def execute(self, _query):
+                pass
+
             def commit(self):
                 pass
 
@@ -376,7 +529,7 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertEqual(self.db.count(), 3)
 
         # Purge with retention_days=0 should immediately (or nearly so) delete
-        # records where created_at < now - 0 days.
+        # records where date < today.
         # Since the records were just created < 1 second ago, 0-day retention
         # may or may not purge them depending on fractional seconds.
         # Instead, just verify the method accepts the parameter and runs.
@@ -388,16 +541,16 @@ class TestClipboardDatabase(unittest.TestCase):
         conn = self.db._get_connection()
         try:
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-60 days'))",
-                ("text", "old_record_60_days")
+                'INSERT INTO clips (date, "index", type, content) VALUES (date("now", "localtime", "-60 days"), 1, ?, ?)',
+                ("text", "old_record_60_days"),
             )
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-45 days'))",
-                ("text", "old_record_45_days")
+                'INSERT INTO clips (date, "index", type, content) VALUES (date("now", "localtime", "-45 days"), 1, ?, ?)',
+                ("text", "old_record_45_days"),
             )
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, datetime('now', 'localtime', '-1 day'))",
-                ("text", "recent_record")
+                'INSERT INTO clips (date, "index", type, content) VALUES (date("now", "localtime", "-1 day"), 1, ?, ?)',
+                ("text", "recent_record"),
             )
             conn.commit()
         finally:
@@ -426,12 +579,12 @@ class TestClipboardDatabase(unittest.TestCase):
         conn = self.db._get_connection()
         try:
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, ?)",
-                ("text", "very_old_1", "2026-01-01 00:00:00")
+                'INSERT INTO clips (date, "index", type, content) VALUES (?, ?, ?, ?)',
+                ("2026-01-01", 1, "text", "very_old_1"),
             )
             conn.execute(
-                "INSERT INTO clips (type, content, created_at) VALUES (?, ?, ?)",
-                ("text", "very_old_2", "2026-02-15 00:00:00")
+                'INSERT INTO clips (date, "index", type, content) VALUES (?, ?, ?, ?)',
+                ("2026-02-15", 1, "text", "very_old_2"),
             )
             conn.commit()
         finally:
@@ -442,12 +595,11 @@ class TestClipboardDatabase(unittest.TestCase):
         self.assertEqual(purged, 2)
         self.assertEqual(self.db.count(), 0)
 
-    def test_created_at_is_set(self):
-        """Test that created_at timestamp is set on insert."""
-        row_id = self.db.insert("timestamp test")
+    def test_date_and_index_are_set_on_insert(self):
+        row_id = self.db.insert("date and index test")
         record = self.db.get_by_id(row_id)
-        self.assertIsNotNone(record["created_at"])
-        self.assertNotEqual(record["created_at"], "")
+        self.assertEqual(record["date"], date.today().isoformat())
+        self.assertGreaterEqual(record["index"], 1)
 
     def test_get_db_path_creates_directory(self):
         """Test that get_db_path creates the data directory."""

@@ -43,6 +43,8 @@ class SettingsDialog(QDialog):
         shelf_width_ratio,
         theme_name,
         available_themes,
+        history_dates,
+        selected_history_date,
         theme,
         on_show_on_hover,
         on_hide_on_paste,
@@ -58,6 +60,7 @@ class SettingsDialog(QDialog):
         on_chip_max_width,
         on_max_chips,
         on_shelf_width_ratio,
+        on_history_date,
         on_theme,
         parent=None,
     ):
@@ -88,6 +91,24 @@ class SettingsDialog(QDialog):
         self.theme_combo.currentIndexChanged.connect(lambda index: on_theme(self.theme_combo.itemData(index)))
         theme_form.addRow("Theme", self.theme_combo)
         layout.addWidget(theme_group)
+        layout.addSpacing(int(settings_theme.get("section_spacing", 18)))
+
+        history_group = QGroupBox("Filter History")
+        history_form = QFormLayout(history_group)
+        history_form.setContentsMargins(12, 10, 12, 10)
+        history_form.setHorizontalSpacing(12)
+        history_form.setVerticalSpacing(8)
+        self.history_date_combo = QComboBox()
+        self.history_date_combo.addItem("Latest clips", None)
+        for history_date in history_dates:
+            self.history_date_combo.addItem(history_date, history_date)
+        selected_index = self.history_date_combo.findData(selected_history_date)
+        self.history_date_combo.setCurrentIndex(max(0, selected_index))
+        self.history_date_combo.currentIndexChanged.connect(
+            lambda index: on_history_date(self.history_date_combo.itemData(index))
+        )
+        history_form.addRow("Copy date", self.history_date_combo)
+        layout.addWidget(history_group)
         layout.addSpacing(int(settings_theme.get("section_spacing", 18)))
 
         self.show_on_hover = self._add_checkbox(

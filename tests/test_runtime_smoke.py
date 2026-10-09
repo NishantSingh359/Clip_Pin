@@ -45,6 +45,56 @@ class FakeFaviconService:
 
 
 class TestRuntimeSmoke(unittest.TestCase):
+    def test_startup_restores_history_and_shutdown_does_not_clear_it(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+             patch("ui.main_window.ClipboardManager") as clipboard_manager_class, \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"), \
+             patch("ui.main_window.shutdown_favicon_service"):
+            clipboard_manager = clipboard_manager_class.return_value
+            database = clipboard_manager.get_db.return_value
+            database.get_all.return_value = [
+                {"date": "2026-10-09", "index": 1, "content": "saved before restart"},
+            ]
+            window = MainWindow()
+
+            self.assertIn("saved before restart", window.chips_by_content)
+
+            window.shutdown()
+
+            database.clear.assert_not_called()
+            clipboard_manager.image_store.clear_thumbnails.assert_not_called()
+            window.tray_icon.hide()
+            window.deleteLater()
+
+    def test_history_date_filter_loads_all_records_for_selected_day(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch("ui.main_window.APP_STORAGE_DIR", Path(temp_dir)), \
+             patch("ui.main_window.ClipboardManager") as clipboard_manager_class, \
+             patch("ui.main_window.DragDropHandler"), \
+             patch("ui.main_window.PasteController"), \
+             patch("ui.main_window.QTimer"):
+            database = clipboard_manager_class.return_value.get_db.return_value
+            database.get_all.return_value = []
+            database.get_by_date.return_value = [
+                {"date": "2026-10-09", "index": 1, "content": "older clip"},
+                {"date": "2026-10-09", "index": 2, "content": "newer clip"},
+            ]
+            window = MainWindow()
+            window.max_chips = 1
+
+            window.set_history_date_filter("2026-10-09")
+
+            database.get_by_date.assert_called_once_with("2026-10-09")
+            self.assertEqual(
+                set(window.chips_by_content),
+                {"older clip", "newer clip"},
+            )
+            window.tray_icon.hide()
+            window.deleteLater()
+
     def test_cursor_over_chip_context_menu_prevents_shelf_autohide(self):
         with patch("ui.main_window.ClipboardManager"), \
              patch("ui.main_window.DragDropHandler"), \

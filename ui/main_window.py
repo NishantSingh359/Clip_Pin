@@ -35,6 +35,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import sys
+from datetime import date
 from pathlib import Path
 try:
     import winreg
@@ -164,6 +165,7 @@ class MainWindow(QWidget):
         self._target_pos = None
         self.last_target_window = None
         self.chips_by_content = {}
+        self._clip_dates_by_content = {}
         self.is_shelf_pinned = False
         self._is_hiding = False
         self._hotkey_was_down = False
@@ -186,6 +188,7 @@ class MainWindow(QWidget):
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
         self.max_chips = MAX_CHIPS
+        self._history_date_filter = None
         shelf_theme = self.theme.get("shelf", {})
         self.shelf_width_ratio = float(shelf_theme.get("width_ratio", SHELF_WIDTH_RATIO))
         self._next_chip_number = 1
@@ -229,12 +232,6 @@ class MainWindow(QWidget):
         self.paste_controller = PasteController()
         self.dragdrop_handler = DragDropHandler(APP_STORAGE_DIR)
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
-        # Start each session without records left by an unclean shutdown.
-        try:
-            self.clipboard_manager.get_db().clear()
-            self.clipboard_manager.image_store.clear_thumbnails()
-        except Exception:
-            log_exception("Failed to clear clipboard history on startup")
         self.dragdrop_handler.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.text_copied.connect(self.add_clip)
@@ -247,6 +244,11 @@ class MainWindow(QWidget):
         self.animation.setEasingCurve(QEasingCurve.OutCubic)
 
         self.setup_ui()
+        try:
+            recent_history = self.clipboard_manager.get_db().get_all(limit=self.max_chips)
+            self._show_history_records(recent_history)
+        except Exception:
+            log_exception("Failed to restore clipboard history")
         self.update_screen_geometry()
         self.move(self.hidden_pos)
         self.refresh_chip_indexes()
@@ -369,10 +371,41 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to add clipboard chip")
     def add_clip(self, content):
+        if (
+            self._history_date_filter is not None
+            and self._history_date_filter != date.today().isoformat()
+        ):
+            return
         if content in self.chips_by_content:
             return
 
+        self._clip_dates_by_content[content] = date.today().isoformat()
         self.add_chip(content)
+
+    def set_history_date_filter(self, clip_date):
+        try:
+            database = self.clipboard_manager.get_db()
+            records = (
+                database.get_by_date(clip_date)
+                if clip_date is not None
+                else database.get_all(limit=self.max_chips)
+            )
+        except Exception:
+            log_exception("Failed to load clipboard history for selected date")
+            return
+        self._history_date_filter = clip_date
+        self._show_history_records(records)
+
+    def _show_history_records(self, records):
+        chips = list(self.chips_by_content.values())
+        self.chips_by_content.clear()
+        self._clip_dates_by_content.clear()
+        self._remove_chip_widgets(chips)
+        self._next_chip_number = 1
+        for record in records:
+            content = record["content"]
+            self._clip_dates_by_content[content] = record["date"]
+            self.add_clip(content)
 
     @safe_slot("Failed to create clipboard chip")
     def add_chip(self, content):
@@ -423,8 +456,9 @@ class MainWindow(QWidget):
         if not chip:
             return
 
+        clip_date = self._clip_dates_by_content.pop(content, None)
         try:
-            self.clipboard_manager.get_db().delete_by_content(content)
+            self.clipboard_manager.get_db().delete_by_content(content, clip_date)
         except Exception:
             log_exception("Failed to delete clipboard item")
         self.remove_chip_widget(chip)
@@ -488,8 +522,9 @@ class MainWindow(QWidget):
 
         for chip in chips:
             self.chips_by_content.pop(chip.content, None)
+            clip_date = self._clip_dates_by_content.pop(chip.content, None)
             try:
-                self.clipboard_manager.get_db().delete_by_content(chip.content)
+                self.clipboard_manager.get_db().delete_by_content(chip.content, clip_date)
             except Exception:
                 log_exception("Failed to delete clipboard item during clear")
 
@@ -664,6 +699,8 @@ class MainWindow(QWidget):
 
     @safe_slot("Failed to trim chips")
     def trim_chips(self):
+        if self._history_date_filter is not None:
+            return
         chips_to_remove = []
         while len(self.chips_by_content) > self.max_chips:
             chip = self.oldest_unpinned_chip()
@@ -1016,6 +1053,8 @@ class MainWindow(QWidget):
             chip_max_width=self.chip_max_width,
             max_chips=self.max_chips,
             shelf_width_ratio=self.shelf_width_ratio,
+            history_dates=self.clipboard_manager.get_db().get_available_dates(),
+            selected_history_date=self._history_date_filter,
             theme_name=self.theme_name,
             available_themes=self.theme_manager.available_themes(),
             theme=self.theme,
@@ -1033,6 +1072,7 @@ class MainWindow(QWidget):
             on_chip_max_width=self.set_chip_max_width,
             on_max_chips=self.set_max_chips,
             on_shelf_width_ratio=self.set_shelf_width_ratio,
+            on_history_date=self.set_history_date_filter,
             on_theme=self.set_theme,
             parent=None,
         )
@@ -1128,28 +1168,12 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         if self.close_to_tray_enabled:
-            self.clear_history_on_close()
             event.ignore()
             self.hide_shelf(force=True)
             return
         self.tray_icon.hide()
         event.accept()
         QApplication.quit()
-
-    def clear_history_on_close(self):
-        """Remove stored and visible clipboard history when the shelf is closed."""
-        try:
-            self.clipboard_manager.get_db().clear()
-        except Exception:
-            log_exception("Failed to clear clipboard history on close")
-        try:
-            self.clipboard_manager.image_store.clear_thumbnails()
-        except Exception:
-            log_exception("Failed to clear stored clipboard images on close")
-
-        chips = list(self.chips_by_content.values())
-        self.chips_by_content.clear()
-        self._remove_chip_widgets(chips)
 
     def _cursor_over_chip_context_menu(self, cursor):
         popup = self._active_chip_context_menu()
@@ -1391,7 +1415,6 @@ class MainWindow(QWidget):
             self.clipboard_manager.close()
         except Exception:
             log_exception("Failed to shut down clipboard manager")
-        self.clear_history_on_close()
         try:
             shutdown_favicon_service()
         except Exception:
