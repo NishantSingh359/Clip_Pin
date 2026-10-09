@@ -36,6 +36,7 @@ class ClipboardManager(QObject):
         self.image_store = ImageStore(base_dir)
         self.enforce_size_limit = True
         self.db = ClipboardDatabase(base_dir)
+        self._migrate_legacy_image_names()
         self._last_text = ""
         self._last_image_cache_key = None
         self._last_image_hash = None
@@ -62,6 +63,67 @@ class ClipboardManager(QObject):
         self._clipboard_change_timer.setInterval(200)
         self._clipboard_change_timer.timeout.connect(self._process_clipboard_change)
         self.clipboard.dataChanged.connect(self.on_data_changed)
+
+    def _migrate_legacy_image_names(self):
+        """Rename stored screenshot paths and files to the current img-N scheme."""
+        try:
+            records = []
+            offset = 0
+            page_size = 500
+            while True:
+                page = self.db.get_by_type("img", limit=page_size, offset=offset)
+                records.extend(page)
+                if len(page) < page_size:
+                    break
+                offset += page_size
+
+            managed_dir = self.image_store.thumbnail_dir.resolve()
+            legacy_records = []
+            for record in records:
+                old_path = Path(record["content"])
+                if (
+                    old_path.parent.resolve() == managed_dir
+                    and old_path.name.lower().startswith("screenshot-")
+                    and old_path.suffix.lower() == ".png"
+                    and old_path.stem[len("screenshot-"):].isdigit()
+                ):
+                    legacy_records.append((record, old_path))
+
+            occupied_names = {
+                Path(record["content"]).name.casefold()
+                for record in records
+                if Path(record["content"]).name.lower().startswith("img-")
+            }
+            occupied_names.update(path.name.casefold() for path in managed_dir.glob("img-*.png"))
+
+            next_number = 1
+            for record, old_path in reversed(legacy_records):
+                while f"img-{next_number}.png".casefold() in occupied_names:
+                    next_number += 1
+                new_path = managed_dir / f"img-{next_number}.png"
+                old_sidecar = Path(f"{old_path}.mime.json")
+                new_sidecar = Path(f"{new_path}.mime.json")
+                renamed_file = False
+                renamed_sidecar = False
+                try:
+                    if old_path.exists():
+                        old_path.rename(new_path)
+                        renamed_file = True
+                    if old_sidecar.exists():
+                        old_sidecar.rename(new_sidecar)
+                        renamed_sidecar = True
+                    if not self.db.update_content(record["id"], str(new_path)):
+                        raise RuntimeError(f"Clipboard image record {record['id']} disappeared")
+                except Exception:
+                    if renamed_sidecar and new_sidecar.exists():
+                        new_sidecar.rename(old_sidecar)
+                    if renamed_file and new_path.exists():
+                        new_path.rename(old_path)
+                    raise
+                occupied_names.add(new_path.name.casefold())
+                next_number += 1
+        except Exception:
+            log_exception("Failed to migrate legacy screenshot names")
 
     def get_db(self):
         """Return the database instance for external queries."""

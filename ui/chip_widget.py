@@ -335,7 +335,7 @@ class ChipWidget(QWidget):
         if self.color_preview_enabled and self.parse_color_code(content) is not None:
             return "COLOR"
 
-        if Path(content).name.lower().startswith("screenshot") and content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        if Path(content).name.lower().startswith(("screenshot", "img-")) and content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
             return "IMG"
 
         if content.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
@@ -485,7 +485,7 @@ class ChipWidget(QWidget):
             return domain.removeprefix("www.") or content
 
         if self.kind == "IMG":
-            return "Screenshot" if Path(content).name.lower().startswith("screenshot") else os.path.basename(content)
+            return "Img" if Path(content).name.lower().startswith(("screenshot", "img-")) else os.path.basename(content)
 
         if self.kind == "PATH":
             return os.path.basename(content.rstrip("\\/")) or content

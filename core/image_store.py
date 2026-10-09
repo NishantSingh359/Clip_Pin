@@ -85,11 +85,11 @@ class ImageStore:
             return None
 
         image = self._bounded_image(image)
-        if prefix == "screenshot":
+        if prefix in {"screenshot", "img"}:
             number = 1
-            while (self.thumbnail_dir / f"screenshot-{number}.png").exists():
+            while (self.thumbnail_dir / f"img-{number}.png").exists():
                 number += 1
-            path = self.thumbnail_dir / f"screenshot-{number}.png"
+            path = self.thumbnail_dir / f"img-{number}.png"
         else:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = self.thumbnail_dir / f"{prefix}_{stamp}_{uuid4().hex[:8]}.png"

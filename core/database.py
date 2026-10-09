@@ -452,6 +452,17 @@ class ClipboardDatabase:
 
         return self._write_with_retry(operation)
 
+    def update_content(self, record_id: int, content: str) -> bool:
+        """Update a record's content while preserving its date and daily index."""
+        def operation(conn):
+            cursor = conn.execute(
+                "UPDATE clips SET content = ? WHERE rowid = ?",
+                (content, record_id),
+            )
+            return cursor.rowcount > 0
+
+        return self._write_with_retry(operation)
+
     @staticmethod
     def _reindex_date(conn, clip_date):
         rows = conn.execute(
