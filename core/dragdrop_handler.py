@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 
 from core.image_store import ImageStore
-from core.database import ClipboardDatabase
+from core.database import ClipboardDatabase, detect_type
 from config import MAX_CLIP_ITEM_SIZE_BYTES
 from utils.app_logging import log_exception
 from utils.item_limits import is_oversized_file, is_oversized_text
@@ -52,9 +52,15 @@ class DragDropHandler:
                         if self.enforce_size_limit and is_oversized_file(p):
                             self.oversized_item_rejected = True
                             continue
-                        self.db.insert_with_type(it, "path")
+                        self._store_item(it, "path")
                     elif self.enforce_size_limit and is_oversized_text(it):
                         self.oversized_item_rejected = True
+                        continue
+                    elif it.lower().startswith(("http://", "https://", "ftp://")):
+                        self._store_item(it, "link")
+                    else:
+                        # Ignore unsupported external schemes instead of
+                        # presenting them as clipboard text.
                         continue
                     accepted_url_items.append(it)
                 items.extend(accepted_url_items)
@@ -75,6 +81,7 @@ class DragDropHandler:
                         self.oversized_item_rejected = True
                         image_path = None
                 if image_path:
+                    self._store_item(image_path, "img")
                     items.append(image_path)
 
             if not items and not self.oversized_item_rejected and mime_data.hasText():
@@ -82,6 +89,10 @@ class DragDropHandler:
                 if not self.enforce_size_limit or not is_oversized_text(raw_text):
                     text = raw_text.strip()
                     if text:
+                        item_type = detect_type(text)
+                        if item_type == "text" and text.lower().startswith(("http://", "https://", "ftp://")):
+                            item_type = "link"
+                        self._store_item(text, item_type)
                         items.append(text)
                 else:
                     self.oversized_item_rejected = True
@@ -112,6 +123,12 @@ class DragDropHandler:
 
     def _save_image(self, image_data, source_size_bytes=None):
         return self.image_store.save_image(image_data, "drop", source_size_bytes)
+
+    def _store_item(self, content, item_type):
+        try:
+            self.db.insert_with_type(content, item_type)
+        except Exception:
+            log_exception("Failed to store dragged clipboard item")
 
     def _unique(self, items):
         seen = set()
