@@ -9,6 +9,8 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from time import monotonic
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QByteArray, QBuffer, QMimeData, Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import QApplication
@@ -389,22 +391,18 @@ class ClipboardManager(QObject):
 
         mime = self.clipboard.mimeData()
         html_link = self._single_copied_html_link(mime)
-        # Browsers can publish a link as a rich payload that also advertises
-        # image data (for example, a link preview). Treat explicit web URLs as
-        # links before considering the image representation, or the early
-        # image return below silently discards the copied link.
-        has_web_urls = bool(html_link) or (mime.hasUrls() and any(
-            not url.isLocalFile()
-            and url.isValid()
-            and url.scheme().casefold() in {"http", "https", "ftp"}
-            for url in mime.urls()
-        ))
-        if mime.hasImage() and not has_web_urls:
+        # Prefer actual clipboard image data over its source URL. Some browsers
+        # expose only the source URL, handled by the remote image path below.
+        if mime.hasImage():
             image = self.clipboard.image()
             if image.isNull():
                 self._clipboard_image_snapshot = None
                 self._clipboard_image_snapshot_hash = None
                 self._clipboard_rich_formats_snapshot = {}
+                image_url = self._clipboard_image_source_url(mime)
+                if image_url:
+                    self._queue_remote_image(image_url)
+                    return
                 return
             self._clipboard_image_snapshot = image
             self._clipboard_image_snapshot_hash = None
@@ -452,6 +450,11 @@ class ClipboardManager(QObject):
                 source_size_bytes,
                 rich_formats,
             )
+            return
+
+        image_url = self._clipboard_image_source_url(mime)
+        if image_url:
+            self._queue_remote_image(image_url)
             return
 
         if mime.hasUrls():
@@ -608,6 +611,97 @@ class ClipboardManager(QObject):
         if selected_text and clipboard_text != selected_text:
             return None
         return url.toString()
+
+    @staticmethod
+    def _clipboard_image_source_url(mime):
+        """Find an image URL when a browser supplies a reference but no pixels."""
+        candidates = []
+        if mime.hasUrls():
+            candidates.extend(
+                (url.toString(), False)
+                for url in mime.urls()
+                if not url.isLocalFile() and url.isValid()
+            )
+        if mime.hasText():
+            text_candidate = mime.text().strip()
+            if text_candidate.startswith(("http://", "https://")):
+                candidates.append((text_candidate, False))
+
+        if mime.hasHtml():
+            class ImageSourceParser(HTMLParser):
+                def __init__(self):
+                    super().__init__()
+                    self.sources = []
+                    self.visible_text = []
+
+                def handle_starttag(self, tag, attrs):
+                    if tag.casefold() == "img":
+                        source = dict(attrs).get("src")
+                        if source:
+                            self.sources.append(source.strip())
+
+                def handle_data(self, data):
+                    self.visible_text.append(data)
+
+            parser = ImageSourceParser()
+            try:
+                parser.feed(mime.html())
+                if len(parser.sources) == 1 and not " ".join(" ".join(parser.visible_text).split()):
+                    candidates.extend((source, True) for source in parser.sources)
+            except Exception:
+                pass
+
+        image_extensions = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif")
+        for candidate, explicitly_image in candidates:
+            try:
+                parsed = urlsplit(candidate)
+                query = parse_qs(parsed.query)
+                image_targets = query.get("imgurl") or query.get("mediaurl") or []
+                target = image_targets[0] if image_targets else candidate
+                target_parsed = urlsplit(target)
+                if target_parsed.scheme.casefold() not in {"http", "https"}:
+                    continue
+                is_image_target = (
+                    explicitly_image
+                    or bool(image_targets)
+                    or target_parsed.path.casefold().endswith(image_extensions)
+                )
+                if is_image_target:
+                    return target
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _queue_remote_image(self, image_url):
+        self._clipboard_image_snapshot = None
+        self._clipboard_image_snapshot_hash = None
+        self._clipboard_rich_formats_snapshot = {}
+        self._image_executor.submit(self._download_remote_image, image_url)
+
+    def _download_remote_image(self, image_url):
+        """Fetch a browser-copied image reference and store its decoded pixels."""
+        try:
+            request = Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(request, timeout=10) as response:
+                payload = response.read(MAX_CLIP_ITEM_SIZE_BYTES + 1)
+            if len(payload) > MAX_CLIP_ITEM_SIZE_BYTES:
+                if self.enforce_size_limit:
+                    self.oversized_item_rejected.emit()
+                return
+
+            image = QImage.fromData(payload)
+            if image.isNull():
+                return
+            source_size_bytes = self.image_store.image_payload_size(image)
+            if source_size_bytes is None:
+                return
+            if self.enforce_size_limit and source_size_bytes > MAX_CLIP_ITEM_SIZE_BYTES:
+                self.oversized_item_rejected.emit()
+                return
+            self._last_image_cache_key = image.cacheKey()
+            self._process_image(image, source_size_bytes=source_size_bytes)
+        except Exception:
+            log_exception("Failed to fetch copied image from browser URL")
 
     @staticmethod
     def _is_vector_markup(text, mime):
