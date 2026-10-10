@@ -188,7 +188,7 @@ class MainWindow(QWidget):
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
         self.max_chips = MAX_CHIPS
-        self._history_date_filter = None
+        self._history_date_filter = date.today().isoformat()
         shelf_theme = self.theme.get("shelf", {})
         self.shelf_width_ratio = float(shelf_theme.get("width_ratio", SHELF_WIDTH_RATIO))
         self._next_chip_number = 1
@@ -245,8 +245,10 @@ class MainWindow(QWidget):
 
         self.setup_ui()
         try:
-            recent_history = self.clipboard_manager.get_db().get_all(limit=self.max_chips)
-            self._show_history_records(recent_history)
+            today_history = self.clipboard_manager.get_db().get_by_date(
+                self._history_date_filter
+            )
+            self._show_history_records(today_history)
         except Exception:
             log_exception("Failed to restore clipboard history")
         self.update_screen_geometry()
@@ -384,13 +386,10 @@ class MainWindow(QWidget):
         self.add_chip(content)
 
     def set_history_date_filter(self, clip_date):
+        clip_date = clip_date or date.today().isoformat()
         try:
             database = self.clipboard_manager.get_db()
-            records = (
-                database.get_by_date(clip_date)
-                if clip_date is not None
-                else database.get_all(limit=self.max_chips)
-            )
+            records = database.get_by_date(clip_date)
         except Exception:
             log_exception("Failed to load clipboard history for selected date")
             return
@@ -1053,7 +1052,11 @@ class MainWindow(QWidget):
             chip_max_width=self.chip_max_width,
             max_chips=self.max_chips,
             shelf_width_ratio=self.shelf_width_ratio,
-            history_dates=self.clipboard_manager.get_db().get_available_dates(),
+            history_dates=sorted(
+                set(self.clipboard_manager.get_db().get_available_dates())
+                | {date.today().isoformat()},
+                reverse=True,
+            ),
             selected_history_date=self._history_date_filter,
             theme_name=self.theme_name,
             available_themes=self.theme_manager.available_themes(),

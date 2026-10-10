@@ -99,7 +99,6 @@ class SettingsDialog(QDialog):
         history_form.setHorizontalSpacing(12)
         history_form.setVerticalSpacing(8)
         self.history_date_combo = QComboBox()
-        self.history_date_combo.addItem("Latest clips", None)
         for history_date in history_dates:
             self.history_date_combo.addItem(history_date, history_date)
         selected_index = self.history_date_combo.findData(selected_history_date)
