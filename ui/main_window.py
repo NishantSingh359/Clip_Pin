@@ -67,6 +67,9 @@ from config import (
     APP_NAME,
     APP_STORAGE_DIR,
     CHIP_WIDTH_DEFAULTS_VERSION,
+    CLIPBOARD_HISTORY_RETENTION_DAYS,
+    CLIPBOARD_HISTORY_RETENTION_MAX_DAYS,
+    CLIPBOARD_HISTORY_RETENTION_MIN_DAYS,
     CHIP_MIN_WIDTH,
     CHIP_MAX_WIDTH,
     CHIP_WIDTH_MIN_LIMIT,
@@ -188,6 +191,7 @@ class MainWindow(QWidget):
         self.chip_min_width = CHIP_MIN_WIDTH
         self.chip_max_width = CHIP_MAX_WIDTH
         self.max_chips = MAX_CHIPS
+        self.history_retention_days = CLIPBOARD_HISTORY_RETENTION_DAYS
         self._history_date_filter = date.today().isoformat()
         shelf_theme = self.theme.get("shelf", {})
         self.shelf_width_ratio = float(shelf_theme.get("width_ratio", SHELF_WIDTH_RATIO))
@@ -234,6 +238,7 @@ class MainWindow(QWidget):
         self.clipboard_manager = ClipboardManager(APP_STORAGE_DIR)
         self.dragdrop_handler.set_size_limit_enabled(self.prevent_oversize_items_enabled)
         self.clipboard_manager.set_size_limit_enabled(self.prevent_oversize_items_enabled)
+        self._purge_expired_history()
         self.clipboard_manager.text_copied.connect(self.add_clip)
         self.clipboard_manager.image_copied.connect(self.add_clip)
         self.clipboard_manager.path_copied.connect(self.add_clip)
@@ -271,6 +276,10 @@ class MainWindow(QWidget):
         self.hotkey_timer = QTimer()
         self.hotkey_timer.timeout.connect(self.check_toggle_hotkey)
         self.hotkey_timer.start(50)
+
+        self.history_retention_timer = QTimer(self)
+        self.history_retention_timer.timeout.connect(self._purge_expired_history)
+        self.history_retention_timer.start(24 * 60 * 60 * 1000)
 
         self._apply_theme(self.theme_name)
 
@@ -960,6 +969,13 @@ class MainWindow(QWidget):
                 MAX_CHIPS_MIN,
                 min(MAX_CHIPS_MAX, int(settings.get("max_chips", self.max_chips))),
             )
+            self.history_retention_days = max(
+                CLIPBOARD_HISTORY_RETENTION_MIN_DAYS,
+                min(
+                    CLIPBOARD_HISTORY_RETENTION_MAX_DAYS,
+                    int(settings.get("history_retention_days", self.history_retention_days)),
+                ),
+            )
             chip_theme = self.theme.get("chip", {})
             if needs_sizing_defaults_migration:
                 self.chip_min_width = CHIP_MIN_WIDTH
@@ -1002,6 +1018,7 @@ class MainWindow(QWidget):
                         "chip_min_width": self.chip_min_width,
                         "chip_max_width": self.chip_max_width,
                         "max_chips": self.max_chips,
+                        "history_retention_days": self.history_retention_days,
                         "shelf_width_ratio": self.shelf_width_ratio,
                         "theme": self.theme_name,
                         "chip_width_defaults_version": CHIP_WIDTH_DEFAULTS_VERSION,
@@ -1058,6 +1075,7 @@ class MainWindow(QWidget):
                 reverse=True,
             ),
             selected_history_date=self._history_date_filter,
+            history_retention_days=self.history_retention_days,
             theme_name=self.theme_name,
             available_themes=self.theme_manager.available_themes(),
             theme=self.theme,
@@ -1076,6 +1094,7 @@ class MainWindow(QWidget):
             on_max_chips=self.set_max_chips,
             on_shelf_width_ratio=self.set_shelf_width_ratio,
             on_history_date=self.set_history_date_filter,
+            on_history_retention_days=self.set_history_retention_days,
             on_theme=self.set_theme,
             parent=None,
         )
@@ -1086,6 +1105,24 @@ class MainWindow(QWidget):
         self.max_chips = max(MAX_CHIPS_MIN, min(MAX_CHIPS_MAX, int(max_chips)))
         self.trim_chips()
         self._save_context_menu_settings()
+
+    def set_history_retention_days(self, days):
+        self.history_retention_days = max(
+            CLIPBOARD_HISTORY_RETENTION_MIN_DAYS,
+            min(CLIPBOARD_HISTORY_RETENTION_MAX_DAYS, int(days)),
+        )
+        self._purge_expired_history()
+        if self._history_date_filter is not None:
+            self.set_history_date_filter(self._history_date_filter)
+        self._save_context_menu_settings()
+
+    @safe_slot("Failed to purge expired clipboard history")
+    def _purge_expired_history(self):
+        database = self.clipboard_manager.get_db()
+        database.purge_old_records(self.history_retention_days)
+        self.clipboard_manager.image_store.purge_old_thumbnails(
+            self.history_retention_days
+        )
 
     def set_chip_min_width(self, width):
         minimum = CHIP_WIDTH_MIN_LIMIT

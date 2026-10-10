@@ -1,81 +1,67 @@
 # DockPaste
 
-DockPaste is a small clipboard history shelf for **PySide6 / Qt**. It lets you collect clipboard items (text, links, paths, images/screenshots), pin items, and quickly paste them back.
+DockPaste is a lightweight clipboard history shelf built with Python, PySide6, and Qt. It keeps recently copied items close at hand so you can find and paste them again without switching to a separate clipboard manager.
+
+DockPaste is still a work in progress, so you might run into a few bugs or unfinished bits.
+
+## About
+
+I’m not a software developer, and I started DockPaste with no app development experience. The idea came to me, and I shaped it into an app as I learned along the way. I’m sharing it openly so anyone can help fix bugs, solve problems, and make DockPaste better.
 
 ## Features
 
-- Detects clipboard content type (link / text / path / image)
-- Displays items as chips in a floating shelf
-- Pin/unpin chips
-- Clear all unpin chips
-- Delete chips
-- Auto-hides shelf when you move away
-- Use [CTRL + WIN] to pin/unpin shelf
-- Max 100 copy limit
+- Automatically saves copied text, links, file paths, images, and screenshots to local history.
+- Shows clips as compact chips in a floating shelf. Click a chip to paste it into the active app.
+- Drag and drop text, files, and images into the shelf.
+- Pin clips, delete individual clips, or clear all unpinned clips.
+- Browse history by copy date. History is stored between app launches and is automatically removed after the retention period.
+- Choose how long to keep history in Settings; the default is 30 days.
+- Preview text or open copied images on double-click, with separate settings for each.
+- Show color previews and website favicons on supported clips.
+- Configure the shelf to appear on hover, hide after pasting, or keep running in the system tray.
+- Set the maximum number of visible chips (100 by default; configurable from 50 to 500).
+- Set a Windows startup option, adjust shelf size, and choose from multiple themes.
+- Optionally prevent clipboard items larger than 5 MB from entering history and show a warning when an item is skipped.
+- On Windows, press **Ctrl + Win** to pin or unpin the shelf.
 
----
+### Preview Text
+*Double-click to preview text*
+![alt text](doc/text_preview.png)
 
-https://github.com/user-attachments/assets/1dcf69b3-304e-4a17-8b0b-03b7b739d8fe
+### Preview Images
+*Double-click to preview image*
+![alt text](doc/image_preview.png)
+## Themes
 
+### Dark
+![Dark theme](doc/dark.png)
 
-## DockPaste Installation Guide (Windows)
+### One Dark Pro Night Flat
+![One Dark Pro Night Flat theme](doc/one_dark_pro_night_flat.png)
 
-### Install DockPaste
+### Dracula
+![Dracula theme](doc/dracula.png)
 
-1. Go to the latest GitHub Release.
-2. Download and run `DockPaste-Setup-1.0.0.exe`.
-3. Follow the installer and launch DockPaste from the Start menu or optional desktop shortcut.
+## Settings
 
-The installer places the application and its required runtime files in the per-user program folder. You do not need to move files into the Windows Startup folder yourself.
+![DockPaste settings](doc/settings.png)
 
----
+## Install on Windows
 
-### Windows SmartScreen Warning
+1. Open the [latest GitHub release](https://github.com/NishantSingh359/DockPaste/releases).
+2. Download and run `DockPaste-Setup-v1.5.exe`.
+3. Follow the installer, then launch DockPaste from the Start menu or the optional desktop shortcut.
 
-Because DockPaste is an indie/open-source app and not code-signed yet, Windows may show: `Windows protected your PC`
+DockPaste currently provides a Windows installer for 64-bit Windows 10 and Windows 11.
 
-If this happens:
+### Windows SmartScreen
 
-1. Click: More info
+Because DockPaste is an unsigned indie and open-source app, Windows may display “Windows protected your PC.” If you trust the installer, select **More info**, then **Run anyway**.
 
-2. Then click: Run anyway
+## Privacy
 
-This is normal for unsigned desktop applications.
+Clipboard history and settings are stored locally on your device. DockPaste does not sync clipboard data to the cloud or include telemetry. When link favicons or copied remote images are used, DockPaste may contact the corresponding website to retrieve them. Old history is removed automatically according to the retention setting.
 
----
+## Contributing
 
-### Auto Start With Windows
-
-Open the DockPaste system tray menu, choose **Settings**, and enable **Start with Windows**. This setting applies to the current Windows user and can be turned off from the same screen.
-
-Enable **Keep Running When Closed** in Settings to hide the shelf in the system tray while DockPaste keeps monitoring the clipboard. Closing the shelf clears its current history; new clips collected while it runs can appear when you reopen it. Choose **Exit** in the tray menu to stop DockPaste completely. The history is also cleared when the app exits, so each launch starts without previous history.
----
-
-### Build The Windows Installer
-
-Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), activate the project virtual environment, then run:
-
-```powershell
-.\build_installer.ps1
-```
-
-The script builds the PyInstaller application bundle and then creates `dist\installer\DockPaste-Setup-1.0.0.exe`. The installed app includes its `_internal` runtime folder; the installer manages these files and creates the application shortcuts.
-
----
-
-### Recommended System
-
-* Windows 10 or Windows 11
-* 64-bit system
-
----
-
-### Privacy
-
-DockPaste stores clipboard history locally on your computer.
-
-No cloud sync.
-No telemetry.
-No online tracking.
-
-All data remains on-device.
+DockPaste is an open-source project, and everyone is welcome to help make it better. Report bugs, suggest improvements, or submit a fix through the [GitHub repository](https://github.com/NishantSingh359/DockPaste).

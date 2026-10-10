@@ -1,5 +1,5 @@
 #define MyAppName "DockPaste"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "v1.5"
 #define MyAppExeName "DockPaste.exe"
 
 [Setup]

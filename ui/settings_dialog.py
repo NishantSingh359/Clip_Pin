@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 from config import (
     CHIP_WIDTH_MAX_LIMIT,
     CHIP_WIDTH_MIN_LIMIT,
+    CLIPBOARD_HISTORY_RETENTION_MAX_DAYS,
+    CLIPBOARD_HISTORY_RETENTION_MIN_DAYS,
     MAX_CHIPS_MIN,
     MAX_CHIPS_MAX,
     SETTINGS_WINDOW_MIN_WIDTH,
@@ -45,6 +47,7 @@ class SettingsDialog(QDialog):
         available_themes,
         history_dates,
         selected_history_date,
+        history_retention_days,
         theme,
         on_show_on_hover,
         on_hide_on_paste,
@@ -61,6 +64,7 @@ class SettingsDialog(QDialog):
         on_max_chips,
         on_shelf_width_ratio,
         on_history_date,
+        on_history_retention_days,
         on_theme,
         parent=None,
     ):
@@ -93,7 +97,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(theme_group)
         layout.addSpacing(int(settings_theme.get("section_spacing", 18)))
 
-        history_group = QGroupBox("Filter History")
+        history_group = QGroupBox("History")
         history_form = QFormLayout(history_group)
         history_form.setContentsMargins(12, 10, 12, 10)
         history_form.setHorizontalSpacing(12)
@@ -106,12 +110,22 @@ class SettingsDialog(QDialog):
         self.history_date_combo.currentIndexChanged.connect(
             lambda index: on_history_date(self.history_date_combo.itemData(index))
         )
-        history_form.addRow("Copy date", self.history_date_combo)
+        history_form.addRow("Copy Date", self.history_date_combo)
+        self.history_retention_days = QSpinBox()
+        self.history_retention_days.setRange(
+            CLIPBOARD_HISTORY_RETENTION_MIN_DAYS,
+            CLIPBOARD_HISTORY_RETENTION_MAX_DAYS,
+        )
+        self.history_retention_days.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.history_retention_days.setSuffix(" Days")
+        self.history_retention_days.setValue(history_retention_days)
+        self.history_retention_days.valueChanged.connect(on_history_retention_days)
+        history_form.addRow("Delete History After", self.history_retention_days)
         layout.addWidget(history_group)
         layout.addSpacing(int(settings_theme.get("section_spacing", 18)))
 
         self.show_on_hover = self._add_checkbox(
-            layout, "Show shelf on Hover", show_on_hover, on_show_on_hover
+            layout, "Show Shelf on Hover", show_on_hover, on_show_on_hover
         )
         self.hide_on_paste = self._add_checkbox(
             layout, "Hide Shelf After Paste", hide_on_paste, on_hide_on_paste
@@ -124,23 +138,23 @@ class SettingsDialog(QDialog):
         )
         self.text_preview_on_double_click = self._add_checkbox(
             layout,
-            "Preview text on double-click",
+            "Preview Text on Double-Click",
             text_preview_on_double_click,
             on_text_preview_on_double_click,
         )
         self.open_images_on_double_click = self._add_checkbox(
             layout,
-            "Open images on double-click",
+            "Open Images on Double-Click",
             open_images_on_double_click,
             on_open_images_on_double_click,
         )
         self.prevent_oversize_items = self._add_checkbox(
-            layout, "Prevent items over 5 MB from entering history",
+            layout, "Prevent Items Over 5 MB from Entering History",
             prevent_oversize_items, on_prevent_oversize_items
         )
         self.oversize_warning = self._add_checkbox(
             layout,
-            "Warn when items exceed 5 MB",
+            "Warn When Items Exceed 5 MB",
             show_oversize_warning,
             on_oversize_warning,
         )
@@ -170,7 +184,7 @@ class SettingsDialog(QDialog):
         self.chip_min_width.setSuffix(" px")
         self.chip_min_width.setValue(chip_min_width)
         self.chip_min_width.valueChanged.connect(on_chip_min_width)
-        chip_form.addRow("Minimum width", self.chip_min_width)
+        chip_form.addRow("Minimum Width", self.chip_min_width)
 
         self.chip_max_width = QSpinBox()
         self.chip_max_width.setRange(CHIP_WIDTH_MIN_LIMIT, CHIP_WIDTH_MAX_LIMIT)
@@ -178,14 +192,14 @@ class SettingsDialog(QDialog):
         self.chip_max_width.setSuffix(" px")
         self.chip_max_width.setValue(chip_max_width)
         self.chip_max_width.valueChanged.connect(on_chip_max_width)
-        chip_form.addRow("Maximum width", self.chip_max_width)
+        chip_form.addRow("Maximum Width", self.chip_max_width)
 
         self.max_chips = QSpinBox()
         self.max_chips.setRange(MAX_CHIPS_MIN, MAX_CHIPS_MAX)
         self.max_chips.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.max_chips.setValue(max_chips)
         self.max_chips.valueChanged.connect(on_max_chips)
-        chip_form.addRow("Maximum chips", self.max_chips)
+        chip_form.addRow("Maximum Chips", self.max_chips)
         layout.addWidget(chip_group)
 
         layout.addSpacing(int(settings_theme.get("section_spacing", 18)))
@@ -205,7 +219,7 @@ class SettingsDialog(QDialog):
         self.shelf_width_ratio.setSingleStep(0.01)
         self.shelf_width_ratio.setValue(shelf_width_ratio)
         self.shelf_width_ratio.valueChanged.connect(on_shelf_width_ratio)
-        shelf_form.addRow("Width ratio", self.shelf_width_ratio)
+        shelf_form.addRow("Width Ratio", self.shelf_width_ratio)
         layout.addWidget(shelf_group)
 
         self.set_theme(theme)
